@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<title>🥍 Lax Stats</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0;}
+body{background:#f0f2f5;font-family:'Courier New',monospace;color:#111827;font-size:15px;}
+button,input{-webkit-appearance:none;appearance:none;font-family:'Courier New',monospace;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+const { useState, useEffect, useRef } = React;
+
+// ── Supabase ─────────────────────────────────────────────────────────────────
+const SB_URL = "https://xhczugdwhppgkwvnlype.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhoY3p1Z2R3aHBwZ2t3dm5seXBlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MzI2MjMsImV4cCI6MjA5MjIwODYyM30.zZBq1ZovIJ863Xjhqn8TxBGvHGXDetPN94hPddeft2o";
+const SB_H  = {"Content-Type":"application/json","apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY};
+
+async function sbFetch(path, opts) {
+  opts = opts || {};
+  const res = await fetch(SB_URL+"/rest/v1"+path, Object.assign({}, opts, {headers: Object.assign({}, SB_H, opts.headers||{})}));
+  if (!res.ok) { const t = await res.text(); throw new Error(res.status+": "+t); }
+  if (res.status === 204) return null;
+  try { return await res.json(); } catch(e) { return null; }
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const STATS = [
+  {key:"defense",    label:"Defense",       emoji:"🛡️", color:"#3b82f6", desc:"Hustle back · 1pt"},
+  {key:"fastbreak",  label:"Fast Break",    emoji:"⚡",  color:"#f59e0b", desc:"Quick offense · 1pt"},
+  {key:"cut",        label:"Off-Ball Cut",  emoji:"✂️",  color:"#10b981", desc:"Off-ball move · 2pts"},
+  {key:"looseball",  label:"Loose Ball",    emoji:"🎯",  color:"#8b5cf6", desc:"Loose ball · 1pt"},
+  {key:"picks",      label:"Pick",          emoji:"🚧",  color:"#ec4899", desc:"Pick set · 3pts"},
+  {key:"transition", label:"Transition",    emoji:"🔄",  color:"#06b6d4", desc:"Transition · 1pt"},
+  {key:"backcheck",  label:"Back Check",    emoji:"🔒",  color:"#f97316", desc:"Back check · 3pts"},
+  {key:"goodpass",   label:"Good Pass",     emoji:"🎯",  color:"#a3e635", desc:"Good pass · 2pts"},
+  {key:"passcaught", label:"Pass Caught",   emoji:"🤝",  color:"#e879f9", desc:"Pass caught · 1pt"},
+  {key:"plus",       label:"Goal For",      emoji:"🟢",  color:"#22c55e", desc:"+1pt on court"},
+  {key:"minus",      label:"Goal Against",  emoji:"🔴",  color:"#ef4444", desc:"-1pt on court"},
+  // Offensive stats (Screen 4)
+  {key:"assists",    label:"Assist",        emoji:"🏹",  color:"#6366f1", desc:"Assist · no pts"},
+  {key:"shots",      label:"Shot",          emoji:"🥍",  color:"#0ea5e9", desc:"Shot · no pts"},
+  {key:"goals",      label:"Goal",          emoji:"🥅",  color:"#16a34a", desc:"Goal scored · no pts"},
+  // Goalie stats (Screen 5 - #30 only)
+  {key:"saves",      label:"Save",          emoji:"🧤",  color:"#1e3a8a", desc:"Goalie save"},
+  {key:"covers",     label:"Cover",         emoji:"🛑",  color:"#7c3aed", desc:"Ball covered"},
+  {key:"goaliepass", label:"Good Pass",     emoji:"📤",  color:"#0891b2", desc:"Goalie good pass"},
+];
+
+// Stat screen groupings
+var STAT_SCREENS = [
+  {id:"s1", label:"Screen 1", sublabel:"Off-Ball / Defense", keys:["cut","defense","fastbreak","plus","minus"]},
+  {id:"s2", label:"Screen 2", sublabel:"Hustle / Movement",  keys:["looseball","picks","transition"]},
+  {id:"s3", label:"Screen 3", sublabel:"Passing / Checking", keys:["passcaught","goodpass","backcheck"]},
+  {id:"s4", label:"Offense",   sublabel:"Shots / Goals / Assists", keys:["assists","shots","goals"]},
+  {id:"s5", label:"Goalie",    sublabel:"#30 Only", keys:["saves","covers","goaliepass"], goalieOnly:true},
+];
+
+const DEFAULT_PLAYERS = ["3","7","8","9","10","11","12","13","14","15","16","17","19","20","22","28","30","32"];
+const LOCAL_KEY = "lax_v4_players";
+
+function loadPlayers() {
+  try { var r=localStorage.getItem(LOCAL_KEY); return r?JSON.parse(r):DEFAULT_PLAYERS; }
+  catch(e) { return DEFAULT_PLAYERS; }
+}
+function savePlayers(p) { try{localStorage.setItem(LOCAL_KEY,JSON.stringify(p));}catch(e){} }
+function saveActiveId(id) { try{localStorage.setItem("lax_active_game_id",id);}catch(e){} }
+function clearActiveId()  { try{localStorage.removeItem("lax_active_game_id");}catch(e){} }
+function loadActiveId()   { try{return localStorage.getItem("lax_active_game_id")||null;}catch(e){return null;} }
+
+function blankStats(players) {
+  var s={};
+  players.forEach(function(n){ s[n]={defense:0,fastbreak:0,cut:0,looseball:0,picks:0,transition:0,backcheck:0,goodpass:0,passcaught:0,plusMinus:0,assists:0,shots:0,goals:0,saves:0,covers:0,goaliepass:0}; });
+  return s;
+}
+
+function calcScore(s) {
+  if(!s) return 0;
+  return (s.defense||0)*1 + (s.fastbreak||0)*1 + (s.cut||0)*2
+       + (s.looseball||0)*1 + (s.picks||0)*3 + (s.transition||0)*1
+       + (s.backcheck||0)*3 + (s.goodpass||0)*2 + (s.passcaught||0)*1
+       + (s.plusMinus||0)*1;
+}
+
+function pmColor(v) { return v>0?"#16a34a":v<0?"#dc2626":"#6b7280"; }
+function pmFmt(v)   { return (v>0?"+":"")+v; }
+function uid()      { return Math.random().toString(36).slice(2,10); }
+
+const M = "'Courier New',monospace";
+
+// ── Light theme tokens ────────────────────────────────────────────────────
+var C = {
+  bg:       "#f0f2f5",   // page background
+  card:     "#ffffff",   // card background
+  cardBdr:  "#e2e6ef",   // card border
+  header:   "#1e3a8a",   // header bar (navy)
+  headerTx: "#ffffff",
+  navBg:    "#ffffff",
+  navBdr:   "#e2e6ef",
+  navAct:   "#1e3a8a",   // active tab underline
+  navActTx: "#1e3a8a",
+  navTx:    "#374151",
+  tabBg:    "#f0f2f5",   // inner tab strip background
+  tabAct:   "#ffffff",
+  tx:       "#111827",   // primary text
+  txSub:    "#374151",   // secondary text
+  txMuted:  "#6b7280",
+  input:    "#ffffff",
+  inputBdr: "#d1d5db",
+  row:      "#f8fafc",   // alt table row
+  rowSel:   "#dbeafe",   // selected row
+  sel:      "#1e3a8a",   // selected chip bg
+  selTx:    "#ffffff",
+  chip:     "#f0f2f5",   // unselected chip
+  chipBdr:  "#d1d5db",
+  chipTx:   "#111827",
+  chipHas:  "#eff6ff",   // chip with data
+  chipHasBdr:"#93c5fd",
+  green:    "#16a34a",
+  red:      "#dc2626",
+  amber:    "#d97706",
+  liveG:    "#16a34a",
+  divider:  "#e5e7eb",
+};
+
+// ── Sparkline ─────────────────────────────────────────────────────────────────
+function Spark(props) {
+  var vals=props.vals, color=props.color||"#f59e0b", w=props.w||160, h=props.h||24;
+  if (!vals||vals.length<2) {
+    return <svg width={w} height={h}><line x1="0" y1={h/2} x2={w} y2={h/2} stroke="#d1d5db" strokeWidth="1"/></svg>;
+  }
+  var mx=Math.max.apply(null,vals.concat([1]));
+  var mn=Math.min.apply(null,vals.concat([0]));
+  var rng=mx-mn||1, p=3;
+  var points=vals.map(function(v,i){
+    var x=p+(i/(vals.length-1))*(w-p*2);
+    var y=h-p-((v-mn)/rng)*(h-p*2);
+    return x+","+y;
+  }).join(" ");
+  var dots=vals.map(function(v,i){
+    var x=p+(i/(vals.length-1))*(w-p*2);
+    var y=h-p-((v-mn)/rng)*(h-p*2);
+    return <circle key={i} cx={x} cy={y} r="3" fill={color}/>;
+  });
+  return (
+    <svg width={w} height={h} style={{overflow:"visible"}}>
+      <polyline points={points} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+      {dots}
+    </svg>
+  );
+}
+
+// ── Player Profile ─────────────────────────────────────────────────────────────
+function Profile(props) {
+  var num=props.num, allGames=props.allGames, activeGame=props.activeGame, onBack=props.onBack;
+  var fin=allGames.filter(function(g){return g.stats&&g.stats[num];});
+  var cur=(activeGame&&activeGame.stats&&activeGame.stats[num])||null;
+  var dS=fin.map(function(g){return g.stats[num].defense||0;});
+  var fS=fin.map(function(g){return g.stats[num].fastbreak||0;});
+  var cS=fin.map(function(g){return g.stats[num].cut||0;});
+  var lbS=fin.map(function(g){return g.stats[num].looseball||0;});
+  var pkS=fin.map(function(g){return g.stats[num].picks||0;});
+  var trS=fin.map(function(g){return g.stats[num].transition||0;});
+  var bcS=fin.map(function(g){return g.stats[num].backcheck||0;});
+  var gpS=fin.map(function(g){return g.stats[num].goodpass||0;});
+  var pcS=fin.map(function(g){return g.stats[num].passcaught||0;});
+  var pS=fin.map(function(g){return g.stats[num].plusMinus||0;});
+  var ptS=fin.map(function(g){return calcScore(g.stats[num]);});
+  var asS=fin.map(function(g){return g.stats[num].assists||0;});
+  var shS=fin.map(function(g){return g.stats[num].shots||0;});
+  var glS=fin.map(function(g){return g.stats[num].goals||0;});
+  var svS=fin.map(function(g){return g.stats[num].saves||0;});
+  var cvS=fin.map(function(g){return g.stats[num].covers||0;});
+  var gkpS=fin.map(function(g){return g.stats[num].goaliepass||0;});
+  var gp=fin.length;
+  var tot=function(arr){return arr.reduce(function(a,b){return a+b;},0);};
+  var avg=function(arr){return gp?(tot(arr)/gp).toFixed(1):"—";};
+  var sDef=tot(dS),sFB=tot(fS),sCut=tot(cS),sLB=tot(lbS),sPK=tot(pkS),sTR=tot(trS),sBC=tot(bcS),sGP=tot(gpS),sPC=tot(pcS),sPM=tot(pS),sPts=tot(ptS);
+  var sAs=tot(asS),sSh=tot(shS),sGl=tot(glS),sSv=tot(svS),sCv=tot(cvS),sGkp=tot(gkpS);
+  var isGoalie=num==="30";
+
+  var rows=[
+    {label:"Defense",      emoji:"🛡️",color:"#3b82f6",total:sDef, series:dS},
+    {label:"Fast Break",   emoji:"⚡", color:"#f59e0b",total:sFB,  series:fS},
+    {label:"Off-Ball Cut", emoji:"✂️", color:"#10b981",total:sCut, series:cS},
+    {label:"Loose Ball",   emoji:"🎯", color:"#8b5cf6",total:sLB,  series:lbS},
+    {label:"Pick",         emoji:"🚧", color:"#ec4899",total:sPK,  series:pkS},
+    {label:"Transition",   emoji:"🔄", color:"#06b6d4",total:sTR,  series:trS},
+    {label:"Back Check",   emoji:"🔒", color:"#f97316",total:sBC,  series:bcS},
+    {label:"Good Pass",    emoji:"🎯", color:"#a3e635",total:sGP,  series:gpS},
+    {label:"Pass Caught",  emoji:"🤝", color:"#e879f9",total:sPC,  series:pcS},
+    {label:"Assists",      emoji:"🏹", color:"#6366f1",total:sAs,  series:asS},
+    {label:"Shots",        emoji:"🥍", color:"#0ea5e9",total:sSh,  series:shS},
+    {label:"Goals",        emoji:"🥅", color:"#16a34a",total:sGl,  series:glS},
+  ].concat(isGoalie?[
+    {label:"Saves",        emoji:"🧤", color:"#1e3a8a",total:sSv,  series:svS},
+    {label:"Covers",       emoji:"🛑", color:"#7c3aed",total:sCv,  series:cvS},
+    {label:"Goalie Pass",  emoji:"📤", color:"#0891b2",total:sGkp, series:gkpS},
+  ]:[]).concat([
+    {label:"+/-",          emoji:"⚖️", color:pmColor(sPM),total:pmFmt(sPM),series:pS,signed:true},
+    {label:"Points",       emoji:"🏆", color:"#f59e0b",total:sPts, series:ptS,highlight:true},
+  ]);
+
+  return (
+    <div style={{padding:18}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18}}>
+        <button onClick={onBack} style={{background:C.tabBg,border:"1px solid "+C.inputBdr,borderRadius:8,color:C.txMuted,fontFamily:M,fontSize:15,fontWeight:700,color:"#111827",padding:"8px 14px",cursor:"pointer"}}>&#8592; Back</button>
+        <div>
+          <div style={{fontSize:24,fontWeight:800,color:"#111827"}}>#{num}</div>
+          <div style={{fontSize:12,color:"#374151",fontWeight:500}}>{gp} game{gp!==1?"s":""} played</div>
+        </div>
+        <div style={{marginLeft:"auto",textAlign:"right"}}>
+          <div style={{fontSize:28,fontWeight:800,color:"#b45309"}}>{sPts}</div>
+          <div style={{fontSize:11,color:"#374151",textTransform:"uppercase",fontWeight:600}}>Season Pts</div>
+        </div>
+      </div>
+
+      {cur && (
+        <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,padding:14,marginBottom:12}}>
+          <div style={{fontSize:10,color:C.red,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>🔴 Live — Current Game</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,marginBottom:10}}>
+            {[{l:"Def",v:cur.defense,c:"#3b82f6"},{l:"FB",v:cur.fastbreak,c:"#f59e0b"},{l:"Cut",v:cur.cut,c:"#10b981"},{l:"LB",v:cur.looseball||0,c:"#8b5cf6"},{l:"Pick",v:cur.picks||0,c:"#ec4899"},{l:"Trans",v:cur.transition||0,c:"#06b6d4"},{l:"BkChk",v:cur.backcheck||0,c:"#f97316"},{l:"GdPs",v:cur.goodpass||0,c:"#a3e635"},{l:"PsCt",v:cur.passcaught||0,c:"#e879f9"},{l:"+/-",v:pmFmt(cur.plusMinus),c:pmColor(cur.plusMinus)}].map(function(x){
+              return (
+                <div key={x.l} style={{background:C.tabBg,borderRadius:8,padding:"10px 6px",textAlign:"center"}}>
+                  <div style={{fontSize:20,fontWeight:700,color:x.c}}>{x.v}</div>
+                  <div style={{fontSize:10,color:C.txSub,marginTop:2}}>{x.l}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{background:C.tabBg,borderRadius:8,padding:10,textAlign:"center"}}>
+            <span style={{fontSize:12,color:"#374151",fontWeight:500}}>Game Score: </span>
+            <span style={{fontSize:20,fontWeight:800,color:"#b45309"}}>{calcScore(cur)} pts</span>
+          </div>
+        </div>
+      )}
+
+      <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,padding:14,marginBottom:12}}>
+        <div style={{fontSize:10,color:C.txSub,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>📊 Season Totals & Averages</div>
+        {rows.map(function(row){
+          var trend=row.series.length>=2&&row.series[row.series.length-1]>=row.series[row.series.length-2];
+          return (
+            <div key={row.label} style={{borderBottom:"1px solid "+C.divider,paddingBottom:12,marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:14}}>{row.emoji}</span>
+                  <span style={{fontSize:13,color:row.highlight?"#b45309":"#374151",fontWeight:row.highlight?800:600}}>{row.label}</span>
+                </div>
+                <div style={{display:"flex",gap:16,alignItems:"center"}}>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:10,color:C.txSub}}>avg/game</div>
+                    <div style={{fontSize:15,fontWeight:700,color:"#111827",color:C.txMuted}}>{row.signed?(gp?(sPM/gp).toFixed(1):"—"):avg(row.series)}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:10,color:C.txSub}}>total</div>
+                    <div style={{fontSize:17,fontWeight:800,color:row.color}}>{row.total}</div>
+                  </div>
+                </div>
+              </div>
+              {row.series.length>=2
+                ? <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <Spark vals={row.series} color={row.color} w={180} h={28}/>
+                    <span style={{fontSize:12,color:trend?C.liveG:C.red}}>{trend?"↑":"↓"}</span>
+                  </div>
+                : <div style={{fontSize:11,color:C.chipTx}}>Need 2+ games for trend</div>
+              }
+            </div>
+          );
+        })}
+      </div>
+
+      {fin.length>0 && (
+        <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden"}}>
+          <div style={{padding:"9px 14px",background:C.tabBg,fontSize:11,color:"#111827",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase"}}>📋 Game Log</div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead>
+              <tr>
+                <th style={{padding:"6px 6px",textAlign:"left",color:C.txSub,fontSize:10}}>Game</th>
+                <th style={{padding:"6px 3px",textAlign:"center",color:C.txSub,fontSize:9}}>🛡️</th>
+                <th style={{padding:"6px 3px",textAlign:"center",color:C.txSub,fontSize:9}}>⚡</th>
+                <th style={{padding:"6px 3px",textAlign:"center",color:C.txSub,fontSize:9}}>✂️</th>
+                <th style={{padding:"6px 3px",textAlign:"center",color:"#8b5cf6",fontSize:9}}>LB</th>
+                <th style={{padding:"6px 3px",textAlign:"center",color:"#ec4899",fontSize:9}}>Pk</th>
+                <th style={{padding:"6px 3px",textAlign:"center",color:"#06b6d4",fontSize:9}}>Tr</th>
+                <th style={{padding:"6px 3px",textAlign:"center",color:"#f97316",fontSize:9}}>BC</th>
+                <th style={{padding:"6px 3px",textAlign:"center",color:"#a3e635",fontSize:9}}>GP</th>
+                <th style={{padding:"6px 3px",textAlign:"center",color:"#e879f9",fontSize:9}}>PC</th>
+                <th style={{padding:"6px 3px",textAlign:"center",color:C.txSub,fontSize:9}}>+/-</th>
+                <th style={{padding:"6px 3px",textAlign:"center",color:"#f59e0b",fontSize:9,fontWeight:700}}>PTS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fin.slice().reverse().map(function(g,i){
+                var s=g.stats[num]; var pts=calcScore(s);
+                return (
+                  <tr key={g.id||i}>
+                    <td style={{padding:"6px 6px",borderTop:"1px solid #e5e7eb",color:C.txMuted,fontSize:10}}>{g.name}</td>
+                    <td style={{padding:"6px 3px",borderTop:"1px solid "+C.divider,textAlign:"center",fontSize:11}}>{s.defense||"—"}</td>
+                    <td style={{padding:"6px 3px",borderTop:"1px solid "+C.divider,textAlign:"center",fontSize:11}}>{s.fastbreak||"—"}</td>
+                    <td style={{padding:"6px 3px",borderTop:"1px solid "+C.divider,textAlign:"center",fontSize:11}}>{s.cut||"—"}</td>
+                    <td style={{padding:"6px 3px",borderTop:"1px solid "+C.divider,textAlign:"center",fontSize:11}}>{s.looseball||"—"}</td>
+                    <td style={{padding:"6px 3px",borderTop:"1px solid "+C.divider,textAlign:"center",fontSize:11}}>{s.picks||"—"}</td>
+                    <td style={{padding:"6px 3px",borderTop:"1px solid "+C.divider,textAlign:"center",fontSize:11}}>{s.transition||"—"}</td>
+                    <td style={{padding:"6px 3px",borderTop:"1px solid "+C.divider,textAlign:"center",fontSize:11}}>{s.backcheck||"—"}</td>
+                    <td style={{padding:"6px 3px",borderTop:"1px solid "+C.divider,textAlign:"center",fontSize:11}}>{s.goodpass||"—"}</td>
+                    <td style={{padding:"6px 3px",borderTop:"1px solid "+C.divider,textAlign:"center",fontSize:11}}>{s.passcaught||"—"}</td>
+                    <td style={{padding:"6px 3px",borderTop:"1px solid "+C.divider,textAlign:"center",color:pmColor(s.plusMinus),fontWeight:700,fontSize:11}}>{pmFmt(s.plusMinus)}</td>
+                    <td style={{padding:"6px 3px",borderTop:"1px solid "+C.divider,textAlign:"center",color:pts>0?"#f59e0b":"#6b7280",fontWeight:700,fontSize:11}}>{pts||"—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function App() {
+  var s = useState, e = useEffect, r = useRef;
+  var players_s      = s(loadPlayers);
+  var players        = players_s[0], setPlayers = players_s[1];
+  var view_s         = s("setup");
+  var view           = view_s[0], setView = view_s[1];
+  var profile_s      = s(null);
+  var profileNum     = profile_s[0], setProfile = profile_s[1];
+  var numInput_s     = s("");
+  var numInput       = numInput_s[0], setNumInput = numInput_s[1];
+  var gameName_s     = s("");
+  var gameName       = gameName_s[0], setGameName = gameName_s[1];
+  var active_s       = s(null);
+  var activeGame     = active_s[0], setActive = active_s[1];
+  var allGames_s     = s([]);
+  var allGames       = allGames_s[0], setAll = allGames_s[1];
+  var selected_s     = s(new Set());
+  var selected       = selected_s[0], setSelected = selected_s[1];
+  var toast_s        = s(null);
+  var toast          = toast_s[0], setToast = toast_s[1];
+  var histExp_s      = s({});
+  var histExp        = histExp_s[0], setHistExp = histExp_s[1];
+  var mergeMode_s    = s(false);
+  var mergeMode      = mergeMode_s[0], setMergeMode = mergeMode_s[1];
+  var mergeSel_s     = s([]);
+  var mergeSel       = mergeSel_s[0], setMergeSel = mergeSel_s[1];
+  var mergeName_s    = s("");
+  var mergeName      = mergeName_s[0], setMergeName = mergeName_s[1];
+  var confEnd_s      = s(false);
+  var confEnd        = confEnd_s[0], setConfEnd = confEnd_s[1];
+  var confDel_s      = s(null);
+  var confDel        = confDel_s[0], setConfDel = confDel_s[1];
+  var syncing_s      = s(false);
+  var syncing        = syncing_s[0], setSyncing = syncing_s[1];
+  var undoMode_s     = s(false);
+  var undoMode       = undoMode_s[0], setUndoMode = undoMode_s[1];
+  var statTab_s      = s("s1");
+  var statTab        = statTab_s[0], setStatTab = statTab_s[1];
+
+  var live_s         = s(false);
+  var live           = live_s[0], setLive = live_s[1];
+  var joinId_s       = s("");
+  var joinId         = joinId_s[0], setJoinId = joinId_s[1];
+  var dbStatus_s     = s("checking");
+  var dbStatus       = dbStatus_s[0], setDbStatus = dbStatus_s[1];
+  var lastErr_s      = s(null);
+  var lastErr        = lastErr_s[0], setLastErr = lastErr_s[1];
+  var resumeId_s     = s(loadActiveId);
+  var resumeId       = resumeId_s[0], setResumeId = resumeId_s[1];
+  var resuming_s     = s(false);
+  var resuming       = resuming_s[0], setResuming = resuming_s[1];
+  var wsRef          = r(null);
+  var pushTmr        = r(null);
+  var pending        = r(null);
+
+  e(function(){ savePlayers(players); }, [players]);
+
+  // DB check on load
+  e(function(){
+    sbFetch("/games?limit=1")
+      .then(function(){ setDbStatus("ok"); })
+      .catch(function(err){ setDbStatus("error"); setLastErr("DB: "+err.message); });
+  }, []);
+
+  function showToast(msg){ setToast(msg); setTimeout(function(){ setToast(null); },2000); }
+
+  function loadHistory(){
+    sbFetch("/games?is_active=eq.false&order=updated_at.desc")
+      .then(function(rows){ setAll(rows||[]); })
+      .catch(function(){ showToast("Could not load history"); });
+  }
+
+  e(function(){ if(view==="history"||view==="players") loadHistory(); }, [view]);
+
+  function subscribe(gameId){
+    if(wsRef.current){ try{wsRef.current.close();}catch(e){} }
+    var ws=new WebSocket(SB_URL+"/realtime/v1/websocket?apikey="+SB_KEY+"&vsn=1.0.0");
+    wsRef.current=ws;
+    ws.onopen=function(){
+      ws.send(JSON.stringify({topic:"realtime:public:games",event:"phx_join",payload:{config:{broadcast:{self:false},presence:{key:""}},access_token:SB_KEY},ref:"1"}));
+    };
+    ws.onmessage=function(ev){
+      try{
+        var m=JSON.parse(ev.data);
+        if(m.event==="phx_reply"&&m.payload&&m.payload.status==="ok") setLive(true);
+        if(m.event==="postgres_changes"){
+          var rec=m.payload&&m.payload.data&&m.payload.data.record;
+          if(rec&&rec.id===gameId) setActive(rec);
+        }
+        if(m.event==="heartbeat") ws.send(JSON.stringify({topic:"phoenix",event:"heartbeat",payload:{},ref:"hb"}));
+      }catch(e){}
+    };
+    ws.onerror=function(){ setLive(false); };
+    ws.onclose=function(){ setLive(false); };
+    setInterval(function(){
+      if(ws.readyState===1) ws.send(JSON.stringify({topic:"phoenix",event:"heartbeat",payload:{},ref:"hb"}));
+    },20000);
+  }
+
+  e(function(){
+    return function(){ try{ if(wsRef.current) wsRef.current.close(); }catch(e){} };
+  },[]);
+
+  // Autosave every 30s as safety net
+  e(function(){
+    var iv=setInterval(function(){
+      if(activeGame&&pending.current){
+        pushStats(activeGame.id,pending.current);
+        pending.current=null;
+      }
+    },30000);
+    return function(){ clearInterval(iv); };
+  },[activeGame]);
+
+  function startGame(){
+    if(!players.length) return;
+    setSyncing(true); setLastErr(null);
+    var name=gameName.trim()||("Game "+new Date().toLocaleDateString("en-CA"));
+    var id=uid();
+    var row={id:id,name:name,date:new Date().toLocaleDateString("en-CA"),stats:blankStats(players),is_active:true};
+    sbFetch("/games",{method:"POST",body:JSON.stringify(row)})
+      .then(function(){
+        saveActiveId(id);
+        setActive(row); subscribe(id);
+        setResumeId(null);
+        setSelected(new Set()); setView("game");
+        showToast("Started · ID: "+id);
+      })
+      .catch(function(err){ setLastErr(err.message); })
+      .finally(function(){ setSyncing(false); });
+  }
+
+  function joinGame(){
+    var id=joinId.trim(); if(!id) return;
+    setSyncing(true); setLastErr(null);
+    sbFetch("/games?id=eq."+id+"&is_active=eq.true")
+      .then(function(rows){
+        if(!rows||!rows.length){ showToast("Game not found"); setSyncing(false); return; }
+        var row=rows[0];
+        saveActiveId(row.id);
+        setActive(row); subscribe(row.id);
+        setResumeId(null);
+        setSelected(new Set()); setView("game");
+        showToast("Joined: "+row.name);
+      })
+      .catch(function(err){ setLastErr(err.message); })
+      .finally(function(){ setSyncing(false); });
+  }
+
+  function pushStats(gid, stats){
+    sbFetch("/games?id=eq."+gid,{method:"PATCH",body:JSON.stringify({stats:stats,updated_at:new Date().toISOString()})})
+      .catch(function(){ showToast("Sync error"); });
+  }
+
+  function logStat(key){
+    if(!selected.size){ showToast("Tap players first"); return; }
+    // Goalie screen: only allow #30
+    var isGoalieStat=["saves","covers","goaliepass"].indexOf(key)>=0;
+    if(isGoalieStat){
+      var hasNonGoalie=false;
+      selected.forEach(function(n){ if(n!=="30") hasNonGoalie=true; });
+      if(hasNonGoalie){ showToast("Goalie stats for #30 only"); return; }
+    }
+    if(!activeGame) return;
+    setActive(function(g){
+      var stats=Object.assign({},g.stats);
+      selected.forEach(function(n){
+        var c=stats[n]||{defense:0,fastbreak:0,cut:0,looseball:0,picks:0,transition:0,backcheck:0,goodpass:0,passcaught:0,plusMinus:0,assists:0,shots:0,goals:0,saves:0,covers:0,goaliepass:0};
+        if(key==="plus")       stats[n]=Object.assign({},c,{plusMinus:c.plusMinus+1});
+        else if(key==="minus") stats[n]=Object.assign({},c,{plusMinus:c.plusMinus-1});
+        else {var u={}; u[key]=c[key]+1; stats[n]=Object.assign({},c,u);}
+      });
+      pending.current=stats;
+      return Object.assign({},g,{stats:stats});
+    });
+    var st=STATS.find(function(s){return s.key===key;});
+    var nums=Array.from(selected).sort(function(a,b){return +a-+b;}).map(function(n){return "#"+n;}).join(" ");
+    showToast(st.emoji+" "+nums);
+    setSelected(new Set());
+    clearTimeout(pushTmr.current);
+    pushTmr.current=setTimeout(function(){
+      if(pending.current&&activeGame){ pushStats(activeGame.id,pending.current); pending.current=null; }
+    },600);
+  }
+
+  function undoStat(key){
+    if(!selected.size){ showToast("Tap players first"); return; }
+    if(!activeGame) return;
+    setActive(function(g){
+      var stats=Object.assign({},g.stats);
+      selected.forEach(function(n){
+        var c=stats[n]||{defense:0,fastbreak:0,cut:0,looseball:0,picks:0,transition:0,backcheck:0,goodpass:0,passcaught:0,plusMinus:0,assists:0,shots:0,goals:0,saves:0,covers:0,goaliepass:0};
+        if(key==="plus")       stats[n]=Object.assign({},c,{plusMinus:c.plusMinus-1});
+        else if(key==="minus") stats[n]=Object.assign({},c,{plusMinus:c.plusMinus+1});
+        else { var u={}; u[key]=Math.max(0,c[key]-1); stats[n]=Object.assign({},c,u); }
+      });
+      pending.current=stats;
+      return Object.assign({},g,{stats:stats});
+    });
+    var st=STATS.find(function(s){return s.key===key;});
+    var nums=Array.from(selected).sort(function(a,b){return +a-+b;}).map(function(n){return "#"+n;}).join(" ");
+    showToast("↩ Removed "+st.emoji+" from "+nums);
+    setSelected(new Set());
+    clearTimeout(pushTmr.current);
+    pushTmr.current=setTimeout(function(){
+      if(pending.current&&activeGame){ pushStats(activeGame.id,pending.current); pending.current=null; }
+    },600);
+  }
+
+  function endGame(){
+    if(!activeGame) return; setSyncing(true);
+    sbFetch("/games?id=eq."+activeGame.id,{method:"PATCH",body:JSON.stringify({is_active:false,updated_at:new Date().toISOString()})})
+      .then(function(){
+        clearActiveId(); setResumeId(null);
+        try{if(wsRef.current)wsRef.current.close();}catch(e){}
+        setActive(null); setConfEnd(false); setSelected(new Set()); setView("history");
+      })
+      .catch(function(){ showToast("Error ending game"); })
+      .finally(function(){ setSyncing(false); });
+  }
+
+  function resumeGame(){
+    var id=resumeId; if(!id) return;
+    setResuming(true); setLastErr(null);
+    sbFetch("/games?id=eq."+id+"&is_active=eq.true")
+      .then(function(rows){
+        if(!rows||!rows.length){
+          clearActiveId(); setResumeId(null);
+          showToast("Game already ended");
+          setResuming(false); return;
+        }
+        var row=rows[0];
+        saveActiveId(row.id);
+        setActive(row); subscribe(row.id);
+        setSelected(new Set()); setView("game");
+        showToast("Resumed: "+row.name);
+      })
+      .catch(function(err){ setLastErr(err.message); })
+      .finally(function(){ setResuming(false); });
+  }
+
+  function dismissResume(){
+    clearActiveId(); setResumeId(null);
+  }
+
+  function toggleMergeSel(id){
+    setMergeSel(function(prev){
+      var idx=prev.indexOf(id);
+      if(idx>=0){ var next=prev.slice(); next.splice(idx,1); return next; }
+      return prev.concat([id]);
+    });
+  }
+
+  function doMerge(){
+    if(mergeSel.length<2){ showToast("Select at least 2 games to merge"); return; }
+    var games=allGames.filter(function(g){return mergeSel.indexOf(g.id)>=0;});
+    // Merge: add all stat values together per player
+    var STAT_KEYS=["defense","fastbreak","cut","looseball","picks","transition","backcheck","goodpass","passcaught","plusMinus","assists","shots","goals","saves","covers","goaliepass"];
+    var merged={};
+    games.forEach(function(g){
+      if(!g.stats) return;
+      Object.entries(g.stats).forEach(function(pair){
+        var n=pair[0], s=pair[1];
+        if(!merged[n]) merged[n]={defense:0,fastbreak:0,cut:0,looseball:0,picks:0,transition:0,backcheck:0,goodpass:0,passcaught:0,plusMinus:0,assists:0,shots:0,goals:0,saves:0,covers:0,goaliepass:0};
+        STAT_KEYS.forEach(function(k){ merged[n][k]=(merged[n][k]||0)+(s[k]||0); });
+      });
+    });
+    var name=(mergeName.trim()||games.map(function(g){return g.name;}).join(" + "))+" (Merged)";
+    var date=games[0].date;
+    var newId=uid();
+    var row={id:newId,name:name,date:date,stats:merged,is_active:false};
+    setSyncing(true);
+    sbFetch("/games",{method:"POST",body:JSON.stringify(row)})
+      .then(function(){
+        showToast("✅ Merged into: "+name);
+        setMergeMode(false); setMergeSel([]); setMergeName("");
+        loadHistory();
+      })
+      .catch(function(e){ showToast("❌ Merge failed: "+e.message); })
+      .finally(function(){ setSyncing(false); });
+  }
+
+  function delGame(id){
+    sbFetch("/games?id=eq."+id,{method:"DELETE"})
+      .then(function(){ setAll(function(g){return g.filter(function(x){return x.id!==id;})}); setConfDel(null); })
+      .catch(function(){ showToast("Delete failed"); });
+  }
+
+  function clearDatabase(){
+    if(!window.confirm) {
+      sbFetch("/games",{method:"DELETE"})
+        .then(function(){ setAll([]); showToast("✅ Database cleared"); })
+        .catch(function(e){ showToast("❌ "+e.message); });
+      return;
+    }
+  }
+
+  function addPlayer(){
+    var n=numInput.trim();
+    if(!n||players.indexOf(n)>=0){ setNumInput(""); return; }
+    setPlayers(function(p){ return p.concat([n]).sort(function(a,b){return +a-+b;}); });
+    setNumInput("");
+  }
+  function remPlayer(n){ setPlayers(function(p){return p.filter(function(x){return x!==n;})}); }
+  function toggle(n){ setSelected(function(p){ var s=new Set(p); s.has(n)?s.delete(n):s.add(n); return s; }); }
+
+  function totG(num,key){ return allGames.reduce(function(s,g){return s+((g.stats&&g.stats[num]&&g.stats[num][key])||0);},0); }
+  function totS(num){ return allGames.reduce(function(s,g){return s+calcScore(g.stats&&g.stats[num]);},0); }
+
+  // ── Excel Export ─────────────────────────────────────────────────────────
+  function exportExcel(mode){
+    var XLSX_mod = window.XLSX;
+    if(!XLSX_mod){ showToast("XLSX library not loaded"); return; }
+    var wb = XLSX_mod.utils.book_new();
+    var COLS = ["#","Defense","Fast Break","Off-Ball Cut","Loose Ball","Pick","Transition","Back Check","Good Pass","Pass Caught","Assists","Shots","Goals","Saves","Covers","Goalie Pass","+/-","Points"];
+    var KEYS = ["defense","fastbreak","cut","looseball","picks","transition","backcheck","goodpass","passcaught","assists","shots","goals","saves","covers","goaliepass","plusMinus"];
+
+    function statRow(n, s){
+      var pts = calcScore(s);
+      var row = [n];
+      KEYS.forEach(function(k){
+        if(["saves","covers","goaliepass"].indexOf(k)>=0 && n!=="30") row.push(0);
+        else row.push(s[k]||0);
+      });
+      row.push(pts);
+      return row;
+    }
+
+    if(!mode||mode==="history"){
+      // Sheet 1: Game-by-game history - every player every game
+      var h1 = [["Game","Date"].concat(COLS)];
+      allGames.forEach(function(g){
+        if(!g.stats) return;
+        Object.entries(g.stats).sort(function(a,b){return +a[0]-+b[0];}).forEach(function(pair){
+          h1.push([g.name, g.date].concat(statRow(pair[0], pair[1])));
+        });
+      });
+      XLSX_mod.utils.book_append_sheet(wb, XLSX_mod.utils.aoa_to_sheet(h1), "Game History");
+
+      // Sheet 2: Career totals
+      var h2 = [["#","Games Played"].concat(COLS.slice(1))];
+      players.slice().sort(function(a,b){return totS(b)-totS(a);}).forEach(function(n){
+        var gp = allGames.filter(function(g){return g.stats&&g.stats[n];}).length;
+        var row = [n, gp];
+        KEYS.forEach(function(k){
+          if(["saves","covers","goaliepass"].indexOf(k)>=0 && n!=="30") row.push(0);
+          else row.push(totG(n,k)||0);
+        });
+        row.push(totS(n));
+        h2.push(row);
+      });
+      XLSX_mod.utils.book_append_sheet(wb, XLSX_mod.utils.aoa_to_sheet(h2), "Career Totals");
+    }
+
+    if(!mode||mode==="trends"){
+      // One sheet per player with game-by-game trend + avg row
+      players.forEach(function(n){
+        var pgames = allGames.filter(function(g){return g.stats&&g.stats[n];});
+        if(!pgames.length) return;
+        var rows = [["Game","Date"].concat(COLS.slice(1))];
+        pgames.forEach(function(g){
+          var s=g.stats[n]; var pts=calcScore(s);
+          var row=[g.name, g.date];
+          KEYS.forEach(function(k){
+            if(["saves","covers","goaliepass"].indexOf(k)>=0 && n!=="30") row.push(0);
+            else row.push(s[k]||0);
+          });
+          row.push(pts);
+          rows.push(row);
+        });
+        // Average row
+        var avgRow=["AVERAGE","—"];
+        KEYS.forEach(function(k){
+          var tot=pgames.reduce(function(s,g){return s+((g.stats[n][k])||0);},0);
+          avgRow.push(pgames.length?(tot/pgames.length).toFixed(1):0);
+        });
+        avgRow.push(pgames.length?(totS(n)/pgames.length).toFixed(1):0);
+        rows.push(avgRow);
+        XLSX_mod.utils.book_append_sheet(wb, XLSX_mod.utils.aoa_to_sheet(rows), ("#"+n).slice(0,31));
+      });
+    }
+
+    var filename = (mode==="trends"?"lax-trends-":"lax-history-")+new Date().toLocaleDateString("en-CA")+".xlsx";
+    XLSX_mod.writeFile(wb, filename);
+    showToast("Exported: "+filename);
+  }
+
+  var TH=function(amber){ return {padding:"7px 6px",textAlign:"center",color:amber?"#b45309":"#374151",fontSize:11,fontWeight:amber?700:600,textTransform:"uppercase",letterSpacing:"0.06em"}; };
+  var TD=function(bold,col){ return {padding:"7px 6px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontWeight:bold?700:500,color:col||"#111827",fontSize:13}; };
+
+  var gs=(activeGame&&activeGame.stats)||{};
+
+  if(profileNum){
+    return (
+      <div style={{minHeight:"100vh",background:C.bg,color:C.tx,fontFamily:M,maxWidth:520,margin:"0 auto"}}>
+        <div style={{background:C.card,borderBottom:"2px solid #1e2235",padding:"14px 18px",fontSize:17,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:C.headerTx}}>🥍 Lax Stats</div>
+        <Profile num={profileNum} allGames={allGames} activeGame={activeGame} onBack={function(){setProfile(null);}}/>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,color:C.tx,fontFamily:M,maxWidth:520,margin:"0 auto"}}>
+
+      {toast&&<div style={{position:"fixed",top:14,left:"50%",transform:"translateX(-50%)",background:C.sel,border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,color:C.selTx,zIndex:999,fontWeight:700,boxShadow:"0 4px 24px #0008",whiteSpace:"nowrap"}}>{toast}</div>}
+
+      <div style={{background:C.card,borderBottom:"2px solid #1e2235",padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:17,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:C.headerTx}}>🥍 Lax Stats</div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          {activeGame&&<div style={{textAlign:"right"}}>
+            <div style={{fontSize:12,color:C.headerTx,fontWeight:700}}>{activeGame.name}</div>
+            <button onClick={function(){try{navigator.clipboard.writeText(activeGame.id);}catch(e){}showToast("Copied: "+activeGame.id);}} style={{background:"#facc15",border:"2px solid #fbbf24",borderRadius:6,color:"#1e3a8a",fontFamily:M,fontSize:13,fontWeight:800,padding:"4px 12px",cursor:"pointer",marginTop:4,letterSpacing:"0.08em",boxShadow:"0 1px 4px #0003"}}>
+              📋 ID: {activeGame.id}
+            </button>
+          </div>}
+          {view==="game"&&<div style={{width:8,height:8,borderRadius:"50%",background:live?C.liveG:C.red,boxShadow:live?"0 0 6px #16a34a66":"none"}}/>}
+        </div>
+      </div>
+
+      <div style={{display:"flex",background:C.bg,padding:"10px 16px 0",borderBottom:"1px solid "+C.divider,gap:2}}>
+        {[["setup","Roster"],["game","Game"],["players","Players"],["history","History"],["guide","Guide"]].map(function(pair){
+          var tab=pair[0],label=pair[1];
+          var act=view===tab, dis=tab==="game"&&!activeGame;
+          return (
+            <button key={tab} onClick={function(){if(dis)return;if(tab==="players"||tab==="history")loadHistory();setView(tab);setProfile(null);}}
+              style={{padding:"7px 10px",border:"none",borderRadius:"4px 4px 0 0",background:act?C.tabBg:"transparent",color:dis?"#d1d5db":act?C.navAct:C.navTx,fontFamily:M,fontSize:12,fontWeight:act?700:600,letterSpacing:"0.1em",textTransform:"uppercase",cursor:dis?"default":"pointer",borderBottom:act?"2px solid "+C.navAct:"2px solid transparent"}}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{padding:18}}>
+
+        {view==="setup"&&(
+          <div>
+            {resumeId&&!activeGame&&(
+              <div style={{background:"#eff6ff",border:"2px solid #1e3a8a",borderRadius:12,padding:16,marginBottom:16}}>
+                <div style={{fontSize:15,fontWeight:700,color:"#111827",color:"#1e3a8a",marginBottom:4}}>🔄 Active Game Detected</div>
+                <div style={{fontSize:12,color:"#374151",marginBottom:12}}>A game is in progress (ID: <strong>{resumeId}</strong>). Tap Resume to rejoin it.</div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={resumeGame} disabled={resuming}
+                    style={{flex:1,background:"#1e3a8a",border:"none",borderRadius:8,color:"#fff",fontFamily:M,fontSize:15,fontWeight:700,color:"#111827",padding:"11px",cursor:"pointer",textTransform:"uppercase"}}>
+                    {resuming?"Resuming…":"▶ Resume Game"}
+                  </button>
+                  <button onClick={dismissResume}
+                    style={{background:"transparent",border:"1px solid #93c5fd",borderRadius:8,color:"#1e3a8a",fontFamily:M,fontSize:12,fontWeight:700,padding:"11px 14px",cursor:"pointer"}}>
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+            <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,padding:16,marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:11,color:"#111827",letterSpacing:"0.12em",textTransform:"uppercase",fontWeight:700}}>Start New Game</div>
+                <div style={{fontSize:12,fontWeight:700,color:dbStatus==="ok"?C.liveG:dbStatus==="error"?C.red:C.amber}}>
+                  {dbStatus==="ok"?"● Connected":dbStatus==="error"?"● DB Error":"● Checking…"}
+                </div>
+              </div>
+              <input style={{background:C.tabBg,border:"1px solid "+C.inputBdr,borderRadius:6,color:C.tx,fontFamily:M,fontSize:14,padding:"9px 12px",outline:"none",width:"100%",marginBottom:10,display:"block"}}
+                placeholder="Game name (optional)" value={gameName} onChange={function(ev){setGameName(ev.target.value);}}/>
+              <button style={{background:syncing?"#1e2235":"#10b981",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:16,fontWeight:700,padding:13,cursor:syncing?"default":"pointer",textTransform:"uppercase",width:"100%"}}
+                onClick={startGame} disabled={syncing}>{syncing?"Connecting…":"▶ Start Game"}</button>
+              {lastErr&&<div style={{marginTop:10,background:"#fef2f2",border:"1px solid #ef4444",borderRadius:6,padding:"10px 12px",fontSize:12,color:"#dc2626",wordBreak:"break-all"}}>❌ {lastErr}</div>}
+            </div>
+
+            <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,padding:16,marginBottom:18}}>
+              <div style={{background:"#eff6ff",border:"2px solid #93c5fd",borderRadius:10,padding:16,marginBottom:18}}>
+              <div style={{fontSize:12,color:"#1e3a8a",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6,fontWeight:700}}>📲 Join a Game In Progress</div>
+              <div style={{fontSize:13,color:"#1f2937",marginBottom:10}}>Get the Game ID from the person who started the game — it shows in the top-right corner and can be tapped to copy.</div>
+              <div style={{display:"flex",gap:8}}>
+                <input style={{background:"#fff",border:"2px solid #93c5fd",borderRadius:6,color:"#111827",fontFamily:M,fontSize:16,padding:"10px 12px",outline:"none",flex:1,fontWeight:700,letterSpacing:"0.1em"}}
+                  placeholder="Paste Game ID" value={joinId} onChange={function(ev){setJoinId(ev.target.value.trim());}}/>
+                <button style={{background:"#1e3a8a",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:15,fontWeight:700,color:"#111827",padding:"10px 16px",cursor:"pointer",textTransform:"uppercase"}} onClick={joinGame}>Join</button>
+              </div>
+            </div>
+            </div>
+
+            <div style={{fontSize:11,color:"#111827",letterSpacing:"0.12em",textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Roster — {players.length} players</div>
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <input style={{background:C.tabBg,border:"1px solid "+C.inputBdr,borderRadius:6,color:C.tx,fontFamily:M,fontSize:16,padding:"9px 12px",outline:"none",flex:1}}
+                placeholder="Jersey #" type="tel" value={numInput} maxLength="3"
+                onChange={function(ev){setNumInput(ev.target.value.replace(/\D/g,""));}}
+                onKeyDown={function(ev){if(ev.key==="Enter")addPlayer();}}/>
+              <button style={{background:"#3b82f6",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:14,fontWeight:700,padding:"9px 16px",cursor:"pointer",textTransform:"uppercase"}} onClick={addPlayer}>Add</button>
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {players.map(function(n){
+                return (
+                  <div key={n} style={{background:C.tabBg,border:"1px solid "+C.inputBdr,borderRadius:8,padding:"7px 12px",display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontWeight:700,fontSize:16,color:"#111827"}}>#{n}</span>
+                    <button onClick={function(){remPlayer(n);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:13,padding:0}}>✕</button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {view==="game"&&activeGame&&(
+          <div>
+            {/* Step-by-step hint bar — always visible at top */}
+            <div style={{background:"#1e3a8a",borderRadius:10,padding:"10px 14px",marginBottom:12}}>
+              <div style={{fontSize:11,color:"#93c5fd",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6}}>How to log a stat</div>
+              <div style={{display:"flex",gap:0,alignItems:"stretch"}}>
+                {[
+                  {step:"1",label:"Pick Screen",done:true,icon:"🗂️"},
+                  {step:"2",label:"Pick Player"+(selected.size?"s ("+selected.size+")":"s"),done:selected.size>0,icon:"👤"},
+                  {step:"3",label:selected.size?"Tap a Stat":"Tap a Stat",done:false,icon:"✅"},
+                ].map(function(s,i){
+                  return (
+                    <div key={s.step} style={{flex:1,display:"flex",alignItems:"center",gap:0}}>
+                      <div style={{flex:1,textAlign:"center",padding:"4px 2px",background:s.done?"rgba(255,255,255,0.15)":"rgba(255,255,255,0.05)",borderRadius:6}}>
+                        <div style={{fontSize:16}}>{s.icon}</div>
+                        <div style={{fontSize:9,color:s.done?"#ffffff":"#93c5fd",fontWeight:s.done?700:500,marginTop:2,letterSpacing:"0.04em"}}>{s.label}</div>
+                      </div>
+                      {i<2&&<div style={{color:"#4b72a0",fontSize:14,padding:"0 3px"}}>›</div>}
+                    </div>
+                  );
+                })}
+              </div>
+              {selected.size>0&&(
+                <div style={{marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:12,color:"#bfdbfe",fontWeight:600}}>{selected.size} player{selected.size>1?"s":""} selected</span>
+                  <button style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:4,color:"#fff",fontFamily:M,fontSize:11,fontWeight:700,padding:"3px 10px",cursor:"pointer"}} onClick={function(){setSelected(new Set());}}>Clear ✕</button>
+                </div>
+              )}
+            </div>
+
+            {/* Stat screen tabs */}
+            <div style={{display:"flex",gap:2,marginBottom:12,background:C.tabBg,borderRadius:10,padding:4}}>
+              {STAT_SCREENS.map(function(sc){
+                var act=statTab===sc.id;
+                var emoji=sc.id==="s1"?"🛡️":sc.id==="s2"?"⚡":sc.id==="s3"?"🤝":sc.id==="s4"?"🥍":"🧤";
+                return (
+                  <button key={sc.id} onClick={function(){setStatTab(sc.id);setSelected(new Set());setUndoMode(false);}}
+                    style={{flex:1,minWidth:"18%",padding:"8px 2px",border:"none",borderRadius:8,background:act?C.tabAct:"transparent",color:act?C.navAct:C.navTx,fontFamily:M,fontSize:9,fontWeight:act?700:600,cursor:"pointer",textAlign:"center",boxShadow:act?"0 1px 4px #0002":"none",borderBottom:act?"2px solid #1e3a8a":"2px solid transparent"}}>
+                    <div style={{fontSize:16,marginBottom:2}}>{emoji}</div>
+                    <div style={{textTransform:"uppercase",fontSize:9}}>{sc.label}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <button style={{background:"transparent",border:"1px solid #1e3a8a",borderRadius:6,color:"#1e3a8a",fontWeight:700,fontSize:12,fontFamily:M,fontSize:11,fontWeight:700,padding:"6px 12px",cursor:"pointer",textTransform:"uppercase"}} onClick={function(){setSelected(new Set(players));}}>All</button>
+              <button style={{background:"transparent",border:"1px solid #4b5563",borderRadius:6,color:C.txSub,fontFamily:M,fontSize:11,fontWeight:700,padding:"6px 12px",cursor:"pointer",textTransform:"uppercase"}} onClick={function(){setSelected(new Set());}}>None</button>
+              <div style={{marginLeft:"auto",fontSize:12,color:selected.size?"#1e3a8a":"#374151",fontWeight:700,alignSelf:"center",fontSize:13}}>{selected.size?selected.size+" selected":"None"}</div>
+            </div>
+
+            {/* Player grid */}
+            <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:14}}>
+              {players.filter(function(n){ return statTab!=="s5"||n==="30"; }).map(function(n){
+                var act=selected.has(n);
+                return (
+                  <button key={n} onClick={function(){toggle(n);}}
+                    style={{width:52,height:52,borderRadius:10,border:"2px solid "+(act?"#1e3a8a":C.chipBdr),background:act?"#1e3a8a":C.chip,color:act?"#ffffff":C.chipTx,fontFamily:M,fontSize:18,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:2,boxShadow:act?"0 2px 8px #1e3a8a55":"none",transition:"all 0.12s"}}>
+                    {n}
+                    {act&&<div style={{fontSize:8,color:C.selTx,lineHeight:1}}>✓</div>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Log / Remove toggle */}
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <button onClick={function(){setUndoMode(false);}} style={{flex:1,padding:"11px 8px",border:"none",borderRadius:8,background:!undoMode?"#1e3a8a":C.tabBg,borderBottom:"3px solid "+(!undoMode?"#1e3a8a":C.chipBdr),color:!undoMode?"#ffffff":"#374151",fontFamily:M,fontSize:15,fontWeight:700,color:"#111827",cursor:"pointer"}}>
+                ➕ Log Stat
+              </button>
+              <button onClick={function(){setUndoMode(true);}} style={{flex:1,padding:"9px 8px",border:"none",borderRadius:8,background:undoMode?"#fef2f2":C.tabBg,borderBottom:"3px solid "+(undoMode?"#dc2626":C.chipBdr),color:undoMode?"#dc2626":C.txSub,fontFamily:M,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                ↩ Remove Stat
+              </button>
+            </div>
+
+            {/* Goalie-only notice */}
+            {statTab==="s5"&&(
+              <div style={{background:"#eff6ff",border:"1px solid #93c5fd",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:"#1e3a8a",fontWeight:600}}>
+                🧤 Goalie screen — select #30 only
+              </div>
+            )}
+
+            {/* Stat buttons — filtered by current screen */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
+              {STATS.filter(function(st){
+                var screen=STAT_SCREENS.find(function(sc){return sc.id===statTab;});
+                return screen&&screen.keys.indexOf(st.key)>=0;
+              }).map(function(st){
+                return (
+                  <button key={st.key} onClick={function(){undoMode?undoStat(st.key):logStat(st.key);}}
+                    style={{padding:"16px 8px",border:"none",borderRadius:10,
+                      background:undoMode?"#fef2f2":st.color+"18",
+                      borderTop:"3px solid "+(undoMode?"#dc2626":st.color),
+                      color:C.tx,fontFamily:M,fontSize:12,fontWeight:700,cursor:"pointer",textAlign:"center",textTransform:"uppercase"}}>
+                    <div style={{fontSize:24,marginBottom:4}}>{undoMode?"↩":st.emoji}</div>
+                    <div style={{color:undoMode?"#dc2626":st.color}}>{st.label}</div>
+                    <div style={{fontSize:10,color:C.txSub,fontWeight:400,marginTop:2,textTransform:"none"}}>{undoMode?"remove 1":st.desc}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden",marginBottom:16}}>
+              <div style={{padding:"9px 14px",background:C.tabBg,fontSize:11,color:"#111827",letterSpacing:"0.1em",textTransform:"uppercase",display:"flex",justifyContent:"space-between",fontWeight:700}}>
+                <span>Live Scoreboard</span>
+                <span style={{color:live?"#15803d":"#dc2626",fontWeight:700}}>{live?"● LIVE":"● OFF"}</span>
+              </div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                <thead>
+                  <tr>
+                    <th style={Object.assign({},TH(),{textAlign:"left",padding:"7px 8px"})}>#</th>
+                    <th style={TH()}>🛡️</th><th style={TH()}>⚡</th><th style={TH()}>✂️</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#8b5cf6",fontSize:11,fontWeight:700}}>LB</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#ec4899",fontSize:11,fontWeight:700}}>Pk</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#06b6d4",fontSize:11,fontWeight:700}}>Tr</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#f97316",fontSize:11,fontWeight:700}}>BC</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#a3e635",fontSize:11,fontWeight:700}}>GP</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#e879f9",fontSize:11,fontWeight:700}}>PC</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#6366f1",fontSize:11,fontWeight:700}}>AS</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#0ea5e9",fontSize:11,fontWeight:700}}>SH</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#16a34a",fontSize:11,fontWeight:700}}>GL</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#1e3a8a",fontSize:11,fontWeight:700}}>SV</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#7c3aed",fontSize:11,fontWeight:700}}>CV</th>
+                    <th style={{padding:"7px 3px",textAlign:"center",color:"#0891b2",fontSize:11,fontWeight:700}}>GKP</th>
+                    <th style={TH()}>+/-</th><th style={TH(true)}>PTS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {players.slice().sort(function(a,b){return calcScore(gs[b])-calcScore(gs[a]);}).map(function(n){
+                    var sv=gs[n]||{defense:0,fastbreak:0,cut:0,looseball:0,picks:0,transition:0,backcheck:0,goodpass:0,passcaught:0,plusMinus:0,assists:0,shots:0,goals:0,saves:0,covers:0,goaliepass:0};
+                    var isSel=selected.has(n), pts=calcScore(sv);
+                    return (
+                      <tr key={n} style={{background:isSel?C.rowSel:"transparent",cursor:"pointer"}} onClick={function(){toggle(n);}}>
+                        <td style={Object.assign({},TD(true),{textAlign:"left",padding:"7px 8px",color:isSel?C.navAct:C.tx})}>#{n}</td>
+                        <td style={TD()}>{sv.defense||"—"}</td>
+                        <td style={TD()}>{sv.fastbreak||"—"}</td>
+                        <td style={TD()}>{sv.cut||"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.looseball||"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.picks||"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.transition||"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.backcheck||"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.goodpass||"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.passcaught||"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.assists||"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.shots||"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.goals||"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(sv.saves||"—"):"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(sv.covers||"—"):"—"}</td>
+                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(sv.goaliepass||"—"):"—"}</td>
+                        <td style={TD(true,pmColor(sv.plusMinus))}>{pmFmt(sv.plusMinus)}</td>
+                        <td style={TD(true,pts>0?"#b45309":"#6b7280")}>{pts||"—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+
+            {!confEnd
+              ?<button style={{background:"#ef4444",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:14,fontWeight:700,padding:14,cursor:"pointer",textTransform:"uppercase",width:"100%"}} onClick={function(){setConfEnd(true);}}>🏁 End Game &amp; Save</button>
+              :<div style={{background:"#fef2f2",border:"2px solid #dc2626",borderRadius:8,padding:14,textAlign:"center"}}>
+                <div style={{fontSize:13,color:"#dc2626",marginBottom:12}}>End game for ALL scorers and save?</div>
+                <div style={{display:"flex",gap:8}}>
+                  <button style={{flex:1,background:"#ef4444",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:15,fontWeight:700,color:"#111827",padding:10,cursor:"pointer"}} onClick={endGame}>{syncing?"Saving…":"Yes, End Game"}</button>
+                  <button style={{flex:1,background:"transparent",border:"1px solid #374151",borderRadius:6,color:"#111827",fontFamily:M,fontSize:15,fontWeight:700,color:"#111827",padding:10,cursor:"pointer"}} onClick={function(){setConfEnd(false);}}>Cancel</button>
+                </div>
+              </div>
+            }
+          </div>
+        )}
+
+        {view==="players"&&!profileNum&&(
+          <div>
+            <div style={{fontSize:11,color:"#111827",letterSpacing:"0.12em",textTransform:"uppercase",fontWeight:700,marginBottom:12}}>Tap a player to see full stats</div>
+            {players.map(function(n){
+              var sp=totS(n), cp=activeGame?calcScore(activeGame.stats&&activeGame.stats[n]):null;
+              var gp=allGames.filter(function(g){return g.stats&&g.stats[n];}).length;
+              var series=allGames.filter(function(g){return g.stats&&g.stats[n];}).map(function(g){return calcScore(g.stats[n]);});
+              return (
+                <button key={n} onClick={function(){setProfile(n);}}
+                  style={{width:"100%",background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,padding:"12px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:14,cursor:"pointer",textAlign:"left",boxShadow:"0 1px 3px #0001"}}>
+                  <div style={{width:48,height:48,borderRadius:10,background:C.tabBg,border:"1px solid "+C.inputBdr,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:20,color:"#111827",flexShrink:0}}>{n}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:15,fontWeight:700,color:"#111827"}}>#{n}</span>
+                      <span style={{fontSize:20,fontWeight:800,color:"#b45309"}}>{sp} <span style={{fontSize:11,color:C.txMuted,fontWeight:400}}>pts</span></span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
+                      <span style={{fontSize:12,color:"#374151",fontWeight:500}}>{gp} game{gp!==1?"s":""} · avg {gp?(sp/gp).toFixed(1):"—"}/game</span>
+                      {cp!==null&&<span style={{fontSize:11,color:"#60a5fa",fontWeight:700}}>Now: {cp}pts</span>}
+                    </div>
+                    {series.length>=2&&<div style={{marginTop:6}}><Spark vals={series} w={160} h={22}/></div>}
+                  </div>
+                  <div style={{color:"#374151",fontSize:18,fontWeight:700}}>›</div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {view==="guide"&&(
+          <div>
+            <div style={{fontSize:13,color:"#374151",marginBottom:16,lineHeight:1.6}}>
+              All stats tracked per player per game. Points contribute to the player leaderboard.
+            </div>
+
+            {/* Scoring stats */}
+            <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden",marginBottom:14}}>
+              <div style={{padding:"10px 14px",background:"#1e3a8a",fontSize:12,color:"#fff",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase"}}>🏆 Scoring Stats</div>
+              {[
+                {emoji:"🛡️",label:"Defense",abbr:"DEF",pts:"1pt",desc:"Player hustles back on defense to prevent a scoring opportunity."},
+                {emoji:"⚡",label:"Fast Break",abbr:"FB",pts:"1pt",desc:"Player leads or contributes to a fast break offensive opportunity."},
+                {emoji:"✂️",label:"Off-Ball Cut",abbr:"CUT",pts:"2pts",desc:"Player makes a smart off-ball cut to create or receive a scoring chance."},
+                {emoji:"🎯",label:"Loose Ball",abbr:"LB",pts:"1pt",desc:"Player wins or recovers a loose ball under pressure."},
+                {emoji:"🚧",label:"Pick",abbr:"PK",pts:"3pts",desc:"Player sets a successful pick to free up a teammate."},
+                {emoji:"🔄",label:"Transition",abbr:"TR",pts:"1pt",desc:"Player effectively moves ball or body in transition play."},
+                {emoji:"🔒",label:"Back Check",abbr:"BC",pts:"3pts",desc:"Player sprints back to prevent a scoring chance defensively."},
+                {emoji:"🎯",label:"Good Pass",abbr:"GP",pts:"2pts",desc:"Player makes a high-quality pass that creates a clear opportunity."},
+                {emoji:"🤝",label:"Pass Caught",abbr:"PC",pts:"1pt",desc:"Player successfully catches a pass in a difficult situation."},
+                {emoji:"🟢",label:"Goal For",abbr:"+",pts:"+1pt",desc:"Player is on the court when team scores a goal."},
+                {emoji:"🔴",label:"Goal Against",abbr:"−",pts:"−1pt",desc:"Player is on the court when opposing team scores."},
+              ].map(function(s){
+                return (
+                  <div key={s.label} style={{display:"flex",alignItems:"flex-start",gap:12,padding:"12px 14px",borderTop:"1px solid #e5e7eb"}}>
+                    <div style={{fontSize:22,flexShrink:0,width:32,textAlign:"center"}}>{s.emoji}</div>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+                        <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{s.label}</span>
+                        <span style={{fontSize:12,fontWeight:700,background:"#eff6ff",color:"#1e3a8a",borderRadius:4,padding:"2px 8px"}}>{s.pts}</span>
+                      </div>
+                      <div style={{fontSize:12,color:"#374151",lineHeight:1.5}}>{s.desc}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Counting stats */}
+            <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden",marginBottom:14}}>
+              <div style={{padding:"10px 14px",background:"#374151",fontSize:12,color:"#fff",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase"}}>📊 Counting Stats (No Points)</div>
+              {[
+                {emoji:"🏹",label:"Assist",abbr:"AS",desc:"Player makes a direct assist leading to a goal."},
+                {emoji:"🥍",label:"Shot",abbr:"SH",desc:"Player takes a shot on goal."},
+                {emoji:"🥅",label:"Goal",abbr:"GL",desc:"Player scores a goal."},
+              ].map(function(s){
+                return (
+                  <div key={s.label} style={{display:"flex",alignItems:"flex-start",gap:12,padding:"12px 14px",borderTop:"1px solid #e5e7eb"}}>
+                    <div style={{fontSize:22,flexShrink:0,width:32,textAlign:"center"}}>{s.emoji}</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:14,fontWeight:700,color:"#111827",marginBottom:2}}>{s.label} <span style={{fontSize:11,color:"#6b7280",fontWeight:500}}>({s.abbr})</span></div>
+                      <div style={{fontSize:12,color:"#374151",lineHeight:1.5}}>{s.desc}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Goalie stats */}
+            <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden",marginBottom:14}}>
+              <div style={{padding:"10px 14px",background:"#1e3a8a",fontSize:12,color:"#fff",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase"}}>🧤 Goalie Stats (#30 Only)</div>
+              {[
+                {emoji:"🧤",label:"Save",abbr:"SV",desc:"Goalie makes a save to prevent a goal."},
+                {emoji:"🛑",label:"Cover",abbr:"CV",desc:"Goalie covers the ball to stop play and protect possession."},
+                {emoji:"📤",label:"Goalie Pass",abbr:"GKP",desc:"Goalie makes a high-quality outlet pass to start an attack."},
+              ].map(function(s){
+                return (
+                  <div key={s.label} style={{display:"flex",alignItems:"flex-start",gap:12,padding:"12px 14px",borderTop:"1px solid #e5e7eb"}}>
+                    <div style={{fontSize:22,flexShrink:0,width:32,textAlign:"center"}}>{s.emoji}</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:14,fontWeight:700,color:"#111827",marginBottom:2}}>{s.label} <span style={{fontSize:11,color:"#6b7280",fontWeight:500}}>({s.abbr})</span></div>
+                      <div style={{fontSize:12,color:"#374151",lineHeight:1.5}}>{s.desc}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Column key */}
+            <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden",marginBottom:14}}>
+              <div style={{padding:"10px 14px",background:C.tabBg,fontSize:12,color:"#111827",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase"}}>📋 Table Column Key</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:4,padding:12}}>
+                {[
+                  {abbr:"DEF",label:"Defense"},{abbr:"FB",label:"Fast Break"},{abbr:"CUT",label:"Off-Ball Cut"},
+                  {abbr:"LB",label:"Loose Ball"},{abbr:"Pk",label:"Pick"},{abbr:"Tr",label:"Transition"},
+                  {abbr:"BC",label:"Back Check"},{abbr:"GP",label:"Good Pass"},{abbr:"PC",label:"Pass Caught"},
+                  {abbr:"AS",label:"Assist"},{abbr:"SH",label:"Shot"},{abbr:"GL",label:"Goal"},
+                  {abbr:"SV",label:"Save"},{abbr:"CV",label:"Cover"},{abbr:"GKP",label:"Goalie Pass"},
+                  {abbr:"+/-",label:"Plus/Minus"},{abbr:"PTS",label:"Points"},
+                ].map(function(c){
+                  return (
+                    <div key={c.abbr} style={{background:"#f0f2f5",border:"1px solid #e5e7eb",borderRadius:6,padding:"4px 10px",fontSize:12}}>
+                      <span style={{fontWeight:700,color:"#1e3a8a"}}>{c.abbr}</span>
+                      <span style={{color:"#374151",marginLeft:4}}>{c.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {view==="history"&&(
+          <div>
+            {!allGames.length&&<div style={{color:"#111827",fontSize:14,fontWeight:500}}>No games saved yet.</div>}
+
+            {/* Merge toolbar */}
+            {allGames.length>1&&(
+              <div style={{marginBottom:14}}>
+                {!mergeMode?(
+                  <button onClick={function(){setMergeMode(true);setMergeSel([]);}}
+                    style={{background:"#f59e0b",border:"none",borderRadius:8,color:"#fff",fontFamily:M,fontSize:13,fontWeight:700,padding:"10px 18px",cursor:"pointer",textTransform:"uppercase",marginBottom:2}}>
+                    🔀 Merge Duplicate Games
+                  </button>
+                ):(
+                  <div style={{background:"#fffbeb",border:"2px solid #f59e0b",borderRadius:10,padding:14}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"#92400e",marginBottom:6}}>Select 2+ games to merge — stats will be added together</div>
+                    <div style={{fontSize:12,color:"#78350f",marginBottom:10}}>{mergeSel.length} game{mergeSel.length!==1?"s":""} selected</div>
+                    <input
+                      placeholder="Name the merged game (optional)"
+                      value={mergeName}
+                      onChange={function(ev){setMergeName(ev.target.value);}}
+                      style={{background:"#fff",border:"2px solid #f59e0b",borderRadius:6,color:"#111827",fontFamily:M,fontSize:14,padding:"9px 12px",outline:"none",width:"100%",marginBottom:10,display:"block",boxSizing:"border-box"}}
+                    />
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={doMerge} disabled={mergeSel.length<2||syncing}
+                        style={{flex:1,background:mergeSel.length>=2?"#f59e0b":"#d1d5db",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:13,fontWeight:700,padding:"10px",cursor:mergeSel.length>=2?"pointer":"default",textTransform:"uppercase"}}>
+                        {syncing?"Merging…":"✅ Merge Selected"}
+                      </button>
+                      <button onClick={function(){setMergeMode(false);setMergeSel([]);}}
+                        style={{background:"transparent",border:"1px solid #9ca3af",borderRadius:6,color:"#374151",fontFamily:M,fontSize:13,fontWeight:700,padding:"10px 16px",cursor:"pointer"}}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {allGames.length>0&&players.length>0&&(
+              <div style={{marginBottom:24}}>
+                <div style={{fontSize:11,color:"#111827",letterSpacing:"0.12em",textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Career Totals — {allGames.length} game{allGames.length>1?"s":""}</div>
+                <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                    <thead>
+                      <tr>
+                        <th style={Object.assign({},TH(),{textAlign:"left",padding:"7px 8px"})}>#</th>
+                        <th style={TH()}>🛡️</th><th style={TH()}>⚡</th><th style={TH()}>✂️</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#8b5cf6",fontSize:11,fontWeight:700}}>LB</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#ec4899",fontSize:11,fontWeight:700}}>Pk</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#06b6d4",fontSize:11,fontWeight:700}}>Tr</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#f97316",fontSize:11,fontWeight:700}}>BC</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#a3e635",fontSize:11,fontWeight:700}}>GP</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#e879f9",fontSize:11,fontWeight:700}}>PC</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#6366f1",fontSize:11,fontWeight:700}}>AS</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#0ea5e9",fontSize:11,fontWeight:700}}>SH</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#16a34a",fontSize:11,fontWeight:700}}>GL</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#1e3a8a",fontSize:11,fontWeight:700}}>SV</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#7c3aed",fontSize:11,fontWeight:700}}>CV</th>
+                        <th style={{padding:"7px 3px",textAlign:"center",color:"#0891b2",fontSize:11,fontWeight:700}}>GKP</th>
+                        <th style={TH()}>+/-</th><th style={TH(true)}>PTS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {players.slice().sort(function(a,b){return totS(b)-totS(a);}).map(function(n){
+                        var pm=totG(n,"plusMinus"), pts=totS(n);
+                        return (
+                          <tr key={n} style={{cursor:"pointer"}} onClick={function(){setProfile(n);setView("players");}}>
+                            <td style={Object.assign({},TD(true),{textAlign:"left",padding:"7px 8px",color:"#60a5fa"})}>#{n}</td>
+                            <td style={TD()}>{totG(n,"defense")||"—"}</td>
+                            <td style={TD()}>{totG(n,"fastbreak")||"—"}</td>
+                            <td style={TD()}>{totG(n,"cut")||"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"looseball")||"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"picks")||"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"transition")||"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"backcheck")||"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"goodpass")||"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"passcaught")||"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"assists")||"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"shots")||"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"goals")||"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(totG(n,"saves")||"—"):"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(totG(n,"covers")||"—"):"—"}</td>
+                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(totG(n,"goaliepass")||"—"):"—"}</td>
+                            <td style={TD(true,pmColor(pm))}>{pmFmt(pm)}</td>
+                            <td style={TD(true,pts>0?"#b45309":"#6b7280")}>{pts||"—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {allGames.map(function(game){
+              var exp=histExp[game.id];
+              return (
+                <div key={game.id} style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,marginBottom:12,overflow:"hidden"}}>
+                  <div style={{padding:"10px 14px",background:mergeMode&&mergeSel.indexOf(game.id)>=0?"#fef3c7":C.tabBg,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:mergeMode?"pointer":"default",border:mergeMode&&mergeSel.indexOf(game.id)>=0?"2px solid #f59e0b":"2px solid transparent"}}
+                    onClick={mergeMode?function(){toggleMergeSel(game.id);}:undefined}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      {mergeMode&&(
+                        <div style={{width:22,height:22,borderRadius:6,border:"2px solid "+(mergeSel.indexOf(game.id)>=0?"#f59e0b":"#d1d5db"),background:mergeSel.indexOf(game.id)>=0?"#f59e0b":"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          {mergeSel.indexOf(game.id)>=0&&<span style={{color:"#fff",fontSize:14,fontWeight:700}}>✓</span>}
+                        </div>
+                      )}
+                      <div>
+                        <div style={{fontWeight:700,fontSize:15,color:"#111827"}}>{game.name}</div>
+                        <div style={{fontSize:12,color:"#374151",fontWeight:500}}>{game.date} · {game.id}</div>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button style={{background:"transparent",border:"1px solid #4b5563",borderRadius:6,color:"#374151",fontFamily:M,fontSize:12,fontWeight:700,padding:"5px 10px",cursor:"pointer",textTransform:"uppercase"}}
+                        onClick={function(){setHistExp(function(h){var u=Object.assign({},h);u[game.id]=!exp;return u;});}}>{exp?"Hide":"Stats"}</button>
+                      {confDel===game.id
+                        ?<span><button style={{background:"#ef4444",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer",marginRight:6}} onClick={function(){delGame(game.id);}}>Sure?</button>
+                           <button style={{background:"transparent",border:"1px solid #4b5563",borderRadius:6,color:"#374151",fontFamily:M,fontSize:12,fontWeight:700,padding:"5px 10px",cursor:"pointer"}} onClick={function(){setConfDel(null);}}>No</button></span>
+                        :<button style={{background:"transparent",border:"1px solid #dc2626",borderRadius:6,color:"#dc2626",fontFamily:M,fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer",textTransform:"uppercase"}} onClick={function(){setConfDel(game.id);}}>Del</button>
+                      }
+                    </div>
+                  </div>
+                  {exp&&game.stats&&(
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                      <thead>
+                        <tr>
+                          <th style={Object.assign({},TH(),{textAlign:"left",padding:"7px 8px"})}>#</th>
+                          <th style={TH()}>🛡️</th><th style={TH()}>⚡</th><th style={TH()}>✂️</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#8b5cf6",fontSize:11,fontWeight:700}}>LB</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#ec4899",fontSize:11,fontWeight:700}}>Pk</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#06b6d4",fontSize:11,fontWeight:700}}>Tr</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#f97316",fontSize:11,fontWeight:700}}>BC</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#a3e635",fontSize:11,fontWeight:700}}>GP</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#e879f9",fontSize:11,fontWeight:700}}>PC</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#6366f1",fontSize:11,fontWeight:700}}>AS</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#0ea5e9",fontSize:11,fontWeight:700}}>SH</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#16a34a",fontSize:11,fontWeight:700}}>GL</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#1e3a8a",fontSize:11,fontWeight:700}}>SV</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#7c3aed",fontSize:11,fontWeight:700}}>CV</th>
+                          <th style={{padding:"7px 3px",textAlign:"center",color:"#0891b2",fontSize:11,fontWeight:700}}>GKP</th>
+                          <th style={TH()}>+/-</th><th style={TH(true)}>PTS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(game.stats).sort(function(a,b){return calcScore(b[1])-calcScore(a[1]);}).map(function(pair){
+                          var n=pair[0],sv=pair[1],pts=calcScore(sv);
+                          return (
+                            <tr key={n} style={{cursor:"pointer"}} onClick={function(){setProfile(n);setView("players");}}>
+                              <td style={Object.assign({},TD(true),{textAlign:"left",padding:"7px 8px",color:"#60a5fa"})}>#{n}</td>
+                              <td style={TD()}>{sv.defense||"—"}</td>
+                              <td style={TD()}>{sv.fastbreak||"—"}</td>
+                              <td style={TD()}>{sv.cut||"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.looseball||"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.picks||"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.transition||"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.backcheck||"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.goodpass||"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.passcaught||"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.assists||"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.shots||"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.goals||"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(sv.saves||"—"):"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(sv.covers||"—"):"—"}</td>
+                              <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(sv.goaliepass||"—"):"—"}</td>
+                              <td style={TD(true,pmColor(sv.plusMinus))}>{pmFmt(sv.plusMinus)}</td>
+                              <td style={TD(true,pts>0?"#b45309":"#6b7280")}>{pts||"—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              );
+            })}
+            <div style={{display:"flex",gap:8,marginTop:4,marginBottom:8}}>
+              <button onClick={function(){exportExcel("history");}} style={{flex:1,background:"#16a34a",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:14,fontWeight:700,padding:12,cursor:"pointer",textTransform:"uppercase"}}>
+                📊 Export History
+              </button>
+              <button onClick={function(){exportExcel("trends");}} style={{flex:1,background:"#6366f1",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:14,fontWeight:700,padding:12,cursor:"pointer",textTransform:"uppercase"}}>
+                📈 Export Trends
+              </button>
+            </div>
+            <button style={{background:"#1e3a8a",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:15,fontWeight:700,padding:14,cursor:"pointer",textTransform:"uppercase",width:"100%",marginTop:0}}
+              onClick={function(){setGameName("");setView("setup");}}>+ New Game</button>
+          </div>
+        )}
+      </div>
+      <div style={{height:40}}/>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
