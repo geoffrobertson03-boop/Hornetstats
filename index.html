@@ -19,23 +19,25 @@ button,input{-webkit-appearance:none;appearance:none;font-family:'Courier New',m
 <div id="root"></div>
 <script type="text/babel">
 
-const { useState, useEffect, useRef } = React;
+var useState=React.useState,useEffect=React.useEffect,useRef=React.useRef;
 
 // ── Supabase ─────────────────────────────────────────────────────────────────
-const SB_URL = "https://xhczugdwhppgkwvnlype.supabase.co";
-const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhoY3p1Z2R3aHBwZ2t3dm5seXBlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MzI2MjMsImV4cCI6MjA5MjIwODYyM30.zZBq1ZovIJ863Xjhqn8TxBGvHGXDetPN94hPddeft2o";
-const SB_H  = {"Content-Type":"application/json","apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY};
+var SB_URL = "https://xhczugdwhppgkwvnlype.supabase.co";
+var SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhoY3p1Z2R3aHBwZ2t3dm5seXBlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MzI2MjMsImV4cCI6MjA5MjIwODYyM30.zZBq1ZovIJ863Xjhqn8TxBGvHGXDetPN94hPddeft2o";
+var SB_H = {"Content-Type":"application/json","apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY};
 
-async function sbFetch(path, opts) {
+function sbFetch(path, opts) {
   opts = opts || {};
-  const res = await fetch(SB_URL+"/rest/v1"+path, Object.assign({}, opts, {headers: Object.assign({}, SB_H, opts.headers||{})}));
-  if (!res.ok) { const t = await res.text(); throw new Error(res.status+": "+t); }
-  if (res.status === 204) return null;
-  try { return await res.json(); } catch(e) { return null; }
+  return fetch(SB_URL+"/rest/v1"+path, Object.assign({}, opts, {headers:Object.assign({},SB_H,opts.headers||{})}))
+    .then(function(res){
+      if(!res.ok) return res.text().then(function(t){throw new Error(res.status+": "+t);});
+      if(res.status===204) return null;
+      return res.json().catch(function(){return null;});
+    });
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const STATS = [
+var STATS = [
   {key:"defense",    label:"Defense",       emoji:"🛡️", color:"#3b82f6", desc:"Hustle back · 1pt"},
   {key:"fastbreak",  label:"Fast Break",    emoji:"⚡",  color:"#f59e0b", desc:"Quick offense · 1pt"},
   {key:"cut",        label:"Off-Ball Cut",  emoji:"✂️",  color:"#10b981", desc:"Off-ball move · 2pts"},
@@ -66,8 +68,8 @@ var STAT_SCREENS = [
   {id:"s5", label:"Goalie",    sublabel:"#30 Only", keys:["saves","covers","goaliepass"], goalieOnly:true},
 ];
 
-const DEFAULT_PLAYERS = ["3","7","8","9","10","11","12","13","14","15","16","17","19","20","22","28","30","32"];
-const LOCAL_KEY = "lax_v4_players";
+var DEFAULT_PLAYERS = ["3","7","8","9","10","11","12","13","14","15","16","17","19","20","22","28","30","32"];
+var LOCAL_KEY = "lax_v4_players";
 
 function loadPlayers() {
   try { var r=localStorage.getItem(LOCAL_KEY); return r?JSON.parse(r):DEFAULT_PLAYERS; }
@@ -96,7 +98,7 @@ function pmColor(v) { return v>0?"#16a34a":v<0?"#dc2626":"#6b7280"; }
 function pmFmt(v)   { return (v>0?"+":"")+v; }
 function uid()      { return Math.random().toString(36).slice(2,10); }
 
-const M = "'Courier New',monospace";
+var M = "'Courier New',monospace";
 
 // ── Light theme tokens ────────────────────────────────────────────────────
 var C = {
@@ -617,7 +619,7 @@ function App() {
   }
 
   function clearDatabase(){
-    if(!window.confirm) {
+    if(false) {
       sbFetch("/games",{method:"DELETE"})
         .then(function(){ setAll([]); showToast("✅ Database cleared"); })
         .catch(function(e){ showToast("❌ "+e.message); });
@@ -636,6 +638,45 @@ function App() {
 
   function totG(num,key){ return allGames.reduce(function(s,g){return s+((g.stats&&g.stats[num]&&g.stats[num][key])||0);},0); }
   function totS(num){ return allGames.reduce(function(s,g){return s+calcScore(g.stats&&g.stats[num]);},0); }
+
+  // Coaching analysis: per-player avg per game for each scoring stat
+  // Returns {strengths:[], weaknesses:[], notes:[]} for the team
+  function teamAnalysis(){
+    if(!allGames.length) return null;
+    var gp=allGames.length;
+    var SCORING_KEYS=[
+      {key:"defense",  label:"Defense",     pts:1},
+      {key:"fastbreak",label:"Fast Break",  pts:1},
+      {key:"cut",      label:"Off-Ball Cut",pts:2},
+      {key:"looseball",label:"Loose Ball",  pts:1},
+      {key:"picks",    label:"Picks",       pts:3},
+      {key:"transition",label:"Transition", pts:1},
+      {key:"backcheck",label:"Back Check",  pts:3},
+      {key:"goodpass", label:"Good Pass",   pts:2},
+      {key:"passcaught",label:"Pass Caught",pts:1},
+    ];
+    // Team avg per game per stat
+    var statAvgs=SCORING_KEYS.map(function(sk){
+      var total=players.reduce(function(sum,n){return sum+totG(n,sk.key);},0);
+      return {key:sk.key,label:sk.label,pts:sk.pts,avgPerGame:total/gp,totalPts:(total*sk.pts)};
+    });
+    // Find top 3 strongest (highest pts contribution per game)
+    var sorted=statAvgs.slice().sort(function(a,b){return b.totalPts-a.totalPts;});
+    var strengths=sorted.slice(0,3);
+    var weaknesses=sorted.slice(-3).reverse();
+    // +/- analysis
+    var pmTotal=players.reduce(function(sum,n){return sum+totG(n,"plusMinus");},0);
+    var pmPerGame=(pmTotal/gp).toFixed(1);
+    // Top scorer
+    var topScorer=players.slice().sort(function(a,b){return totS(b)-totS(a);})[0];
+    var topScore=totS(topScorer);
+    // Consistency: find player with most games played
+    var mostGames=players.reduce(function(best,n){
+      var gp2=allGames.filter(function(g){return g.stats&&g.stats[n];}).length;
+      return gp2>best.gp?{n:n,gp:gp2}:best;
+    },{n:"",gp:0});
+    return {strengths:strengths,weaknesses:weaknesses,pmPerGame:pmPerGame,topScorer:topScorer,topScore:topScore,mostGames:mostGames};
+  }
 
   // ── Excel Export ─────────────────────────────────────────────────────────
   function exportExcel(mode){
@@ -987,7 +1028,7 @@ function App() {
 
 
             {!confEnd
-              ?<button style={{background:"#ef4444",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:14,fontWeight:700,padding:14,cursor:"pointer",textTransform:"uppercase",width:"100%"}} onClick={function(){setConfEnd(true);}}>🏁 End Game &amp; Save</button>
+              ?<button style={{background:"#ef4444",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:14,fontWeight:700,padding:14,cursor:"pointer",textTransform:"uppercase",width:"100%"}} onClick={function(){setConfEnd(true);}}>🏁 End Game & Save</button>
               :<div style={{background:"#fef2f2",border:"2px solid #dc2626",borderRadius:8,padding:14,textAlign:"center"}}>
                 <div style={{fontSize:13,color:"#dc2626",marginBottom:12}}>End game for ALL scorers and save?</div>
                 <div style={{display:"flex",gap:8}}>
@@ -1168,34 +1209,31 @@ function App() {
 
             {allGames.length>0&&players.length>0&&(
               <div style={{marginBottom:24}}>
-                <div style={{fontSize:11,color:"#111827",letterSpacing:"0.12em",textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Career Totals — {allGames.length} game{allGames.length>1?"s":""}</div>
-                <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden"}}>
+
+                {/* ── Table 1: Scoring Stats ──────────────────────── */}
+                <div style={{fontSize:11,color:"#111827",letterSpacing:"0.12em",textTransform:"uppercase",fontWeight:700,marginBottom:4}}>Scoring Stats — {allGames.length} game{allGames.length>1?"s":""}</div>
+                <div style={{fontSize:11,color:"#6b7280",marginBottom:8}}>Defense, hustle, passing — contributes to PTS total</div>
+                <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden",marginBottom:16}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
                     <thead>
                       <tr>
                         <th style={Object.assign({},TH(),{textAlign:"left",padding:"7px 8px"})}>#</th>
-                        <th style={TH()}>🛡️</th><th style={TH()}>⚡</th><th style={TH()}>✂️</th>
+                        <th style={TH()}>DEF</th><th style={TH()}>FB</th><th style={TH()}>CUT</th>
                         <th style={{padding:"7px 3px",textAlign:"center",color:"#8b5cf6",fontSize:11,fontWeight:700}}>LB</th>
                         <th style={{padding:"7px 3px",textAlign:"center",color:"#ec4899",fontSize:11,fontWeight:700}}>Pk</th>
                         <th style={{padding:"7px 3px",textAlign:"center",color:"#06b6d4",fontSize:11,fontWeight:700}}>Tr</th>
                         <th style={{padding:"7px 3px",textAlign:"center",color:"#f97316",fontSize:11,fontWeight:700}}>BC</th>
                         <th style={{padding:"7px 3px",textAlign:"center",color:"#a3e635",fontSize:11,fontWeight:700}}>GP</th>
                         <th style={{padding:"7px 3px",textAlign:"center",color:"#e879f9",fontSize:11,fontWeight:700}}>PC</th>
-                        <th style={{padding:"7px 3px",textAlign:"center",color:"#6366f1",fontSize:11,fontWeight:700}}>AS</th>
-                        <th style={{padding:"7px 3px",textAlign:"center",color:"#0ea5e9",fontSize:11,fontWeight:700}}>SH</th>
-                        <th style={{padding:"7px 3px",textAlign:"center",color:"#16a34a",fontSize:11,fontWeight:700}}>GL</th>
-                        <th style={{padding:"7px 3px",textAlign:"center",color:"#1e3a8a",fontSize:11,fontWeight:700}}>SV</th>
-                        <th style={{padding:"7px 3px",textAlign:"center",color:"#7c3aed",fontSize:11,fontWeight:700}}>CV</th>
-                        <th style={{padding:"7px 3px",textAlign:"center",color:"#0891b2",fontSize:11,fontWeight:700}}>GKP</th>
                         <th style={TH()}>+/-</th><th style={TH(true)}>PTS</th>
                       </tr>
                     </thead>
                     <tbody>
                       {players.slice().sort(function(a,b){return totS(b)-totS(a);}).map(function(n){
-                        var pm=totG(n,"plusMinus"), pts=totS(n);
+                        var pm=totG(n,"plusMinus"),pts=totS(n);
                         return (
                           <tr key={n} style={{cursor:"pointer"}} onClick={function(){setProfile(n);setView("players");}}>
-                            <td style={Object.assign({},TD(true),{textAlign:"left",padding:"7px 8px",color:"#60a5fa"})}>#{n}</td>
+                            <td style={Object.assign({},TD(true),{textAlign:"left",padding:"7px 8px",color:"#1e3a8a"})}>#{n}</td>
                             <td style={TD()}>{totG(n,"defense")||"—"}</td>
                             <td style={TD()}>{totG(n,"fastbreak")||"—"}</td>
                             <td style={TD()}>{totG(n,"cut")||"—"}</td>
@@ -1205,12 +1243,6 @@ function App() {
                             <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"backcheck")||"—"}</td>
                             <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"goodpass")||"—"}</td>
                             <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"passcaught")||"—"}</td>
-                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"assists")||"—"}</td>
-                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"shots")||"—"}</td>
-                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"goals")||"—"}</td>
-                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(totG(n,"saves")||"—"):"—"}</td>
-                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(totG(n,"covers")||"—"):"—"}</td>
-                            <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(totG(n,"goaliepass")||"—"):"—"}</td>
                             <td style={TD(true,pmColor(pm))}>{pmFmt(pm)}</td>
                             <td style={TD(true,pts>0?"#b45309":"#6b7280")}>{pts||"—"}</td>
                           </tr>
@@ -1219,6 +1251,113 @@ function App() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* ── Table 2: Offensive + Goalie Stats ──────────── */}
+                <div style={{fontSize:11,color:"#111827",letterSpacing:"0.12em",textTransform:"uppercase",fontWeight:700,marginBottom:4}}>Offensive and Goalie Stats</div>
+                <div style={{fontSize:11,color:"#6b7280",marginBottom:8}}>Tracking only — not included in PTS total. Sorted by offensive output.</div>
+                <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden",marginBottom:16}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                    <thead>
+                      <tr>
+                        <th style={Object.assign({},TH(),{textAlign:"left",padding:"7px 8px"})}>#</th>
+                        <th style={{padding:"7px 4px",textAlign:"center",color:"#6366f1",fontSize:11,fontWeight:700}}>AS</th>
+                        <th style={{padding:"7px 4px",textAlign:"center",color:"#0ea5e9",fontSize:11,fontWeight:700}}>SH</th>
+                        <th style={{padding:"7px 4px",textAlign:"center",color:"#16a34a",fontSize:11,fontWeight:700}}>GL</th>
+                        <th style={{padding:"7px 4px",textAlign:"center",color:"#1e3a8a",fontSize:11,fontWeight:700}}>SV</th>
+                        <th style={{padding:"7px 4px",textAlign:"center",color:"#7c3aed",fontSize:11,fontWeight:700}}>CV</th>
+                        <th style={{padding:"7px 4px",textAlign:"center",color:"#0891b2",fontSize:11,fontWeight:700}}>GKP</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {players.slice().sort(function(a,b){
+                        var aT=totG(a,"assists")+totG(a,"shots")+totG(a,"goals");
+                        var bT=totG(b,"assists")+totG(b,"shots")+totG(b,"goals");
+                        return bT-aT;
+                      }).map(function(n){
+                        var hasAny=totG(n,"assists")||totG(n,"shots")||totG(n,"goals")||totG(n,"saves")||totG(n,"covers")||totG(n,"goaliepass");
+                        if(!hasAny) return null;
+                        return (
+                          <tr key={n} style={{cursor:"pointer"}} onClick={function(){setProfile(n);setView("players");}}>
+                            <td style={Object.assign({},TD(true),{textAlign:"left",padding:"7px 8px",color:"#1e3a8a"})}>#{n}</td>
+                            <td style={{padding:"7px 4px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"assists")||"—"}</td>
+                            <td style={{padding:"7px 4px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"shots")||"—"}</td>
+                            <td style={{padding:"7px 4px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{totG(n,"goals")||"—"}</td>
+                            <td style={{padding:"7px 4px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(totG(n,"saves")||"—"):"—"}</td>
+                            <td style={{padding:"7px 4px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(totG(n,"covers")||"—"):"—"}</td>
+                            <td style={{padding:"7px 4px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(totG(n,"goaliepass")||"—"):"—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* ── Coaching Analysis ────────────────────────────── */}
+                {(function(){
+                  var an=teamAnalysis();
+                  if(!an) return null;
+                  return (
+                    <div style={{marginBottom:4}}>
+                      <div style={{fontSize:11,color:"#111827",letterSpacing:"0.12em",textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Coaching Analysis</div>
+
+                      <div style={{display:"flex",gap:10,marginBottom:10}}>
+                        <div style={{flex:1,background:"#f0fdf4",border:"1px solid #86efac",borderRadius:10,padding:12}}>
+                          <div style={{fontSize:11,fontWeight:700,color:"#15803d",marginBottom:4}}>Top Scorer</div>
+                          <div style={{fontSize:18,fontWeight:800,color:"#1e3a8a"}}>#{an.topScorer}</div>
+                          <div style={{fontSize:12,color:"#374151"}}>{an.topScore} pts</div>
+                          <div style={{fontSize:11,color:"#6b7280"}}>{allGames.length>0?(an.topScore/allGames.length).toFixed(1):0} avg/game</div>
+                        </div>
+                        <div style={{flex:1,background:parseFloat(an.pmPerGame)>=0?"#f0fdf4":"#fef2f2",border:"1px solid "+(parseFloat(an.pmPerGame)>=0?"#86efac":"#fca5a5"),borderRadius:10,padding:12}}>
+                          <div style={{fontSize:11,fontWeight:700,color:parseFloat(an.pmPerGame)>=0?"#15803d":"#dc2626",marginBottom:4}}>Team +/- /game</div>
+                          <div style={{fontSize:22,fontWeight:800,color:parseFloat(an.pmPerGame)>=0?"#15803d":"#dc2626"}}>{an.pmPerGame>0?"+":""}{an.pmPerGame}</div>
+                          <div style={{fontSize:11,color:"#6b7280"}}>{parseFloat(an.pmPerGame)>=0?"Net positive":"Focus on D"}</div>
+                        </div>
+                      </div>
+
+                      <div style={{background:"#eff6ff",border:"1px solid #93c5fd",borderRadius:10,padding:14,marginBottom:10}}>
+                        <div style={{fontSize:12,fontWeight:700,color:"#1e3a8a",marginBottom:8}}>Strengths — highest pts contribution</div>
+                        {an.strengths.map(function(s,i){
+                          return (
+                            <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:6,marginBottom:6,borderBottom:i<2?"1px solid #dbeafe":"none"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                <div style={{width:20,height:20,borderRadius:"50%",background:"#1e3a8a",color:"#fff",fontSize:10,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{i+1}</div>
+                                <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{s.label}</span>
+                                <span style={{fontSize:11,color:"#6b7280"}}>{s.pts}pt</span>
+                              </div>
+                              <div>
+                                <span style={{fontSize:14,fontWeight:700,color:"#1e3a8a"}}>{s.totalPts}pts</span>
+                                <span style={{fontSize:11,color:"#6b7280",marginLeft:6}}>{s.avgPerGame.toFixed(1)}/game</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:14}}>
+                        <div style={{fontSize:12,fontWeight:700,color:"#c2410c",marginBottom:8}}>Coaching Focus — lowest pts contribution</div>
+                        {an.weaknesses.map(function(s,i){
+                          return (
+                            <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:6,marginBottom:6,borderBottom:i<2?"1px solid #fed7aa":"none"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                <div style={{width:20,height:20,borderRadius:"50%",background:"#f97316",color:"#fff",fontSize:10,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{i+1}</div>
+                                <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{s.label}</span>
+                                <span style={{fontSize:11,color:"#6b7280"}}>{s.pts}pt</span>
+                              </div>
+                              <div>
+                                <span style={{fontSize:14,fontWeight:700,color:"#c2410c"}}>{s.totalPts}pts</span>
+                                <span style={{fontSize:11,color:"#6b7280",marginLeft:6}}>{s.avgPerGame.toFixed(1)}/game</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div style={{marginTop:8,fontSize:12,color:"#9a3412",fontWeight:500}}>
+                          Drill recommendation: Focus on {an.weaknesses[0]?an.weaknesses[0].label:"—"} — currently the lowest-contributing stat.
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
               </div>
             )}
             {allGames.map(function(game){
