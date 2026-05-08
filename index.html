@@ -908,7 +908,7 @@ function App() {
               <div style={{display:"flex",gap:0,alignItems:"stretch"}}>
                 {[
                   {step:"1",label:"Pick Screen",done:true,icon:"🗂️"},
-                  {step:"2",label:"Pick Player"+(selected.size?"s ("+selected.size+")":"s"),done:selected.size>0,icon:"👤"},
+                  {step:"2",label:statTab==="s5"?"Auto: #30":("Pick Player"+(selected.size?"s ("+selected.size+")":"s")),done:selected.size>0||statTab==="s5",icon:"👤"},
                   {step:"3",label:selected.size?"Tap a Stat":"Tap a Stat",done:false,icon:"✅"},
                 ].map(function(s,i){
                   return (
@@ -936,7 +936,7 @@ function App() {
                 var act=statTab===sc.id;
                 var emoji=sc.id==="s1"?"🛡️":sc.id==="s2"?"⚡":sc.id==="s3"?"🤝":sc.id==="s4"?"🥍":"🧤";
                 return (
-                  <button key={sc.id} onClick={function(){setStatTab(sc.id);setSelected(new Set());setUndoMode(false);}}
+                  <button key={sc.id} onClick={function(){setStatTab(sc.id);setSelected(sc.id==="s5"?new Set(["30"]):new Set());setUndoMode(false);}}
                     style={{flex:1,minWidth:"18%",padding:"8px 2px",border:"none",borderRadius:8,background:act?C.tabAct:"transparent",color:act?C.navAct:C.navTx,fontFamily:M,fontSize:9,fontWeight:act?700:600,cursor:"pointer",textAlign:"center",boxShadow:act?"0 1px 4px #0002":"none",borderBottom:act?"2px solid #1e3a8a":"2px solid transparent"}}>
                     <div style={{fontSize:16,marginBottom:2}}>{emoji}</div>
                     <div style={{textTransform:"uppercase",fontSize:9}}>{sc.label}</div>
@@ -945,25 +945,36 @@ function App() {
               })}
             </div>
 
-            <div style={{display:"flex",gap:8,marginBottom:10}}>
-              <button style={{background:"transparent",border:"1px solid #1e3a8a",borderRadius:6,color:"#1e3a8a",fontWeight:700,fontSize:12,fontFamily:M,fontSize:11,fontWeight:700,padding:"6px 12px",cursor:"pointer",textTransform:"uppercase"}} onClick={function(){setSelected(new Set(players));}}>All</button>
-              <button style={{background:"transparent",border:"1px solid #4b5563",borderRadius:6,color:C.txSub,fontFamily:M,fontSize:11,fontWeight:700,padding:"6px 12px",cursor:"pointer",textTransform:"uppercase"}} onClick={function(){setSelected(new Set());}}>None</button>
-              <div style={{marginLeft:"auto",fontSize:12,color:selected.size?"#1e3a8a":"#374151",fontWeight:700,alignSelf:"center",fontSize:13}}>{selected.size?selected.size+" selected":"None"}</div>
-            </div>
-
-            {/* Player grid */}
-            <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:14}}>
-              {players.filter(function(n){ return statTab!=="s5"||n==="30"; }).map(function(n){
-                var act=selected.has(n);
-                return (
-                  <button key={n} onClick={function(){toggle(n);}}
-                    style={{width:52,height:52,borderRadius:10,border:"2px solid "+(act?"#1e3a8a":C.chipBdr),background:act?"#1e3a8a":C.chip,color:act?"#ffffff":C.chipTx,fontFamily:M,fontSize:18,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:2,boxShadow:act?"0 2px 8px #1e3a8a55":"none",transition:"all 0.12s"}}>
-                    {n}
-                    {act&&<div style={{fontSize:8,color:C.selTx,lineHeight:1}}>✓</div>}
-                  </button>
-                );
-              })}
-            </div>
+            {statTab!=="s5"&&(
+              <div>
+                <div style={{display:"flex",gap:8,marginBottom:10}}>
+                  <button style={{background:"transparent",border:"1px solid #1e3a8a",borderRadius:6,color:"#1e3a8a",fontFamily:M,fontSize:11,fontWeight:700,padding:"6px 12px",cursor:"pointer",textTransform:"uppercase"}} onClick={function(){setSelected(new Set(players));}}>All</button>
+                  <button style={{background:"transparent",border:"1px solid #4b5563",borderRadius:6,color:C.txSub,fontFamily:M,fontSize:11,fontWeight:700,padding:"6px 12px",cursor:"pointer",textTransform:"uppercase"}} onClick={function(){setSelected(new Set());}}>None</button>
+                  <div style={{marginLeft:"auto",fontSize:13,color:selected.size?"#1e3a8a":"#374151",fontWeight:700,alignSelf:"center"}}>{selected.size?selected.size+" selected":"None"}</div>
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:14}}>
+                  {players.map(function(n){
+                    var act=selected.has(n);
+                    return (
+                      <button key={n} onClick={function(){toggle(n);}}
+                        style={{width:52,height:52,borderRadius:10,border:"2px solid "+(act?"#1e3a8a":C.chipBdr),background:act?"#1e3a8a":C.chip,color:act?"#ffffff":C.chipTx,fontFamily:M,fontSize:18,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:2,boxShadow:act?"0 2px 8px #1e3a8a55":"none",transition:"all 0.12s"}}>
+                        {n}
+                        {act&&<div style={{fontSize:8,color:C.selTx,lineHeight:1}}>✓</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {statTab==="s5"&&(
+              <div style={{background:"#eff6ff",border:"1px solid #93c5fd",borderRadius:8,padding:"10px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:44,height:44,borderRadius:8,background:"#1e3a8a",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:18,flexShrink:0}}>30</div>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:"#1e3a8a"}}>🧤 Goalie — #30 Auto-Selected</div>
+                  <div style={{fontSize:11,color:"#374151"}}>All goalie stats logged to #30</div>
+                </div>
+              </div>
+            )}
 
             {/* Log / Remove toggle */}
             <div style={{display:"flex",gap:8,marginBottom:12}}>
@@ -1002,61 +1013,78 @@ function App() {
               })}
             </div>
 
-            <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden",marginBottom:16}}>
-              <div style={{padding:"9px 14px",background:C.tabBg,fontSize:11,color:"#111827",letterSpacing:"0.1em",textTransform:"uppercase",display:"flex",justifyContent:"space-between",fontWeight:700}}>
-                <span>Live Scoreboard</span>
-                <span style={{color:live?"#15803d":"#dc2626",fontWeight:700}}>{live?"● LIVE":"● OFF"}</span>
-              </div>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                <thead>
-                  <tr>
-                    <th style={Object.assign({},TH(),{textAlign:"left",padding:"7px 8px"})}>#</th>
-                    <th style={TH()}>🛡️</th><th style={TH()}>⚡</th><th style={TH()}>✂️</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#8b5cf6",fontSize:11,fontWeight:700}}>LB</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#ec4899",fontSize:11,fontWeight:700}}>Pk</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#06b6d4",fontSize:11,fontWeight:700}}>Tr</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#f97316",fontSize:11,fontWeight:700}}>BC</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#a3e635",fontSize:11,fontWeight:700}}>GP</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#e879f9",fontSize:11,fontWeight:700}}>PC</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#6366f1",fontSize:11,fontWeight:700}}>AS</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#0ea5e9",fontSize:11,fontWeight:700}}>SH</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#16a34a",fontSize:11,fontWeight:700}}>GL</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#1e3a8a",fontSize:11,fontWeight:700}}>SV</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#7c3aed",fontSize:11,fontWeight:700}}>CV</th>
-                    <th style={{padding:"7px 3px",textAlign:"center",color:"#0891b2",fontSize:11,fontWeight:700}}>GKP</th>
-                    <th style={TH()}>+/-</th><th style={TH(true)}>PTS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {players.slice().sort(function(a,b){return calcScore(gs[b])-calcScore(gs[a]);}).map(function(n){
-                    var sv=gs[n]||{defense:0,fastbreak:0,cut:0,looseball:0,picks:0,transition:0,backcheck:0,goodpass:0,passcaught:0,plusMinus:0,assists:0,shots:0,goals:0,saves:0,covers:0,goaliepass:0};
-                    var isSel=selected.has(n), pts=calcScore(sv);
-                    return (
-                      <tr key={n} style={{background:isSel?C.rowSel:"transparent",cursor:"pointer"}} onClick={function(){toggle(n);}}>
-                        <td style={Object.assign({},TD(true),{textAlign:"left",padding:"7px 8px",color:isSel?C.navAct:C.tx})}>#{n}</td>
-                        <td style={TD()}>{sv.defense||"—"}</td>
-                        <td style={TD()}>{sv.fastbreak||"—"}</td>
-                        <td style={TD()}>{sv.cut||"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.looseball||"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.picks||"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.transition||"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.backcheck||"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.goodpass||"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.passcaught||"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.assists||"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.shots||"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{sv.goals||"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(sv.saves||"—"):"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(sv.covers||"—"):"—"}</td>
-                        <td style={{padding:"7px 3px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:"#111827"}}>{n==="30"?(sv.goaliepass||"—"):"—"}</td>
-                        <td style={TD(true,pmColor(sv.plusMinus))}>{pmFmt(sv.plusMinus)}</td>
-                        <td style={TD(true,pts>0?"#b45309":"#6b7280")}>{pts||"—"}</td>
+            {(function(){
+              // Define columns per screen tab
+              var screenCols = {
+                s1:[
+                  {label:"DEF",  key:"defense",   color:"#3b82f6"},
+                  {label:"FB",   key:"fastbreak",  color:"#f59e0b"},
+                  {label:"CUT",  key:"cut",        color:"#10b981"},
+                  {label:"+/-",  key:"plusMinus",  color:null, pm:true},
+                  {label:"PTS",  key:"pts",        color:"#b45309", pts:true},
+                ],
+                s2:[
+                  {label:"LB",   key:"looseball",  color:"#8b5cf6"},
+                  {label:"Pk",   key:"picks",      color:"#ec4899"},
+                  {label:"Tr",   key:"transition", color:"#06b6d4"},
+                  {label:"PTS",  key:"pts",        color:"#b45309", pts:true},
+                ],
+                s3:[
+                  {label:"PC",   key:"passcaught", color:"#e879f9"},
+                  {label:"GP",   key:"goodpass",   color:"#a3e635"},
+                  {label:"BC",   key:"backcheck",  color:"#f97316"},
+                  {label:"PTS",  key:"pts",        color:"#b45309", pts:true},
+                ],
+                s4:[
+                  {label:"AS",   key:"assists",    color:"#6366f1"},
+                  {label:"SH",   key:"shots",      color:"#0ea5e9"},
+                  {label:"GL",   key:"goals",      color:"#16a34a"},
+                  {label:"PTS",  key:"pts",        color:"#b45309", pts:true},
+                ],
+                s5:[
+                  {label:"SV",   key:"saves",      color:"#1e3a8a"},
+                  {label:"CV",   key:"covers",     color:"#7c3aed"},
+                  {label:"GKP",  key:"goaliepass", color:"#0891b2"},
+                ],
+              };
+              var cols = screenCols[statTab]||screenCols.s1;
+              var rowPlayers = statTab==="s5" ? ["30"] : players.slice().sort(function(a,b){return calcScore(gs[b])-calcScore(gs[a]);});
+              return (
+                <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,overflow:"hidden",marginBottom:16}}>
+                  <div style={{padding:"9px 14px",background:C.tabBg,fontSize:11,color:"#111827",letterSpacing:"0.1em",textTransform:"uppercase",display:"flex",justifyContent:"space-between",fontWeight:700}}>
+                    <span>Live Scoreboard</span>
+                    <span style={{color:live?"#15803d":"#dc2626",fontWeight:700}}>{live?"● LIVE":"● OFF"}</span>
+                  </div>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                    <thead>
+                      <tr>
+                        <th style={Object.assign({},TH(),{textAlign:"left",padding:"7px 10px"})}>#</th>
+                        {cols.map(function(c){
+                          return <th key={c.key} style={{padding:"7px 6px",textAlign:"center",color:c.pts?"#b45309":(c.pm?C.navTx:c.color),fontSize:11,fontWeight:700}}>{c.label}</th>;
+                        })}
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {rowPlayers.map(function(n){
+                        var sv=gs[n]||{defense:0,fastbreak:0,cut:0,looseball:0,picks:0,transition:0,backcheck:0,goodpass:0,passcaught:0,plusMinus:0,assists:0,shots:0,goals:0,saves:0,covers:0,goaliepass:0};
+                        var isSel=selected.has(n), pts=calcScore(sv);
+                        return (
+                          <tr key={n} style={{background:isSel?C.rowSel:"transparent",cursor:statTab!=="s5"?"pointer":"default"}}
+                            onClick={statTab!=="s5"?function(){toggle(n);}:undefined}>
+                            <td style={Object.assign({},TD(true),{textAlign:"left",padding:"7px 10px",color:isSel?C.navAct:C.tx})}>#{n}</td>
+                            {cols.map(function(c){
+                              var val = c.pts ? (pts||"—") : c.pm ? pmFmt(sv.plusMinus) : (sv[c.key]||"—");
+                              var col = c.pts ? (pts>0?"#b45309":"#6b7280") : c.pm ? pmColor(sv.plusMinus) : C.tx;
+                              return <td key={c.key} style={{padding:"7px 6px",textAlign:"center",borderTop:"1px solid #e5e7eb",fontSize:12,color:col,fontWeight:c.pts||c.pm?700:400}}>{val}</td>;
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
 
 
             {!confEnd
