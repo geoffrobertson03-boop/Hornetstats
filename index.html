@@ -165,7 +165,7 @@ function Spark(props) {
 // ── Player Profile ─────────────────────────────────────────────────────────────
 function Profile(props) {
   var num=props.num, allGames=props.allGames, activeGame=props.activeGame, onBack=props.onBack;
-  var fin=allGames.filter(function(g){return g.stats&&g.stats[num];});
+  var fin=allGames.filter(function(g){return g.stats&&g.stats[num];}).slice().reverse();
   var cur=(activeGame&&activeGame.stats&&activeGame.stats[num])||null;
   var dS=fin.map(function(g){return g.stats[num].defense||0;});
   var fS=fin.map(function(g){return g.stats[num].fastbreak||0;});
@@ -640,7 +640,7 @@ function App() {
 
   // Per-player analysis for coaching panel
   function playerAnalysis(num){
-    var pgames=allGames.filter(function(g){return g.stats&&g.stats[num];});
+    var pgames=allGames.filter(function(g){return g.stats&&g.stats[num];}).slice().reverse();
     if(!pgames.length) return null;
     var gp=pgames.length;
     var SCORING=[
@@ -1078,7 +1078,7 @@ function App() {
             {players.map(function(n){
               var sp=totS(n), cp=activeGame?calcScore(activeGame.stats&&activeGame.stats[n]):null;
               var gp=allGames.filter(function(g){return g.stats&&g.stats[n];}).length;
-              var series=allGames.filter(function(g){return g.stats&&g.stats[n];}).map(function(g){return calcScore(g.stats[n]);});
+              var series=allGames.filter(function(g){return g.stats&&g.stats[n];}).map(function(g){return calcScore(g.stats[n]);}).slice().reverse();
               return (
                 <button key={n} onClick={function(){setProfile(n);}}
                   style={{width:"100%",background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,padding:"12px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:14,cursor:"pointer",textAlign:"left",boxShadow:"0 1px 3px #0001"}}>
