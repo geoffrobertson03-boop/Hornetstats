@@ -210,7 +210,7 @@ function Profile(props) {
     {label:"Goalie Pass",  emoji:"📤", color:"#0891b2",total:sGkp, series:gkpS},
   ]:[]).concat([
     {label:"+/-",          emoji:"⚖️", color:pmColor(sPM),total:pmFmt(sPM),series:pS,signed:true},
-    {label:"Points",       emoji:"🏆", color:"#f59e0b",total:sPts, series:ptS,highlight:true},
+    adminMode?{label:"Points",emoji:"🏆",color:"#f59e0b",total:sPts,series:ptS,highlight:true}:null,
   ]);
 
   return (
@@ -222,8 +222,8 @@ function Profile(props) {
           <div style={{fontSize:12,color:"#374151",fontWeight:500}}>{gp} game{gp!==1?"s":""} played</div>
         </div>
         <div style={{marginLeft:"auto",textAlign:"right"}}>
-          <div style={{fontSize:28,fontWeight:800,color:"#b45309"}}>{sPts}</div>
-          <div style={{fontSize:11,color:"#374151",textTransform:"uppercase",fontWeight:600}}>Season Pts</div>
+          {adminMode&&<div style={{fontSize:28,fontWeight:800,color:"#b45309"}}>{sPts}</div>}
+          {adminMode&&<div style={{fontSize:11,color:"#374151",textTransform:"uppercase",fontWeight:600}}>Season Pts</div>}
         </div>
       </div>
 
@@ -249,14 +249,14 @@ function Profile(props) {
 
       <div style={{background:C.card,border:"1px solid "+C.cardBdr,borderRadius:10,padding:14,marginBottom:12}}>
         <div style={{fontSize:10,color:C.txSub,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>📊 Season Totals & Averages</div>
-        {rows.map(function(row){
+        {rows.filter(function(r){return r!==null;}).map(function(row){
           var trend=row.series.length>=2&&row.series[row.series.length-1]>=row.series[row.series.length-2];
           return (
             <div key={row.label} style={{borderBottom:"1px solid "+C.divider,paddingBottom:12,marginBottom:12}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <span style={{fontSize:14}}>{row.emoji}</span>
-                  <span style={{fontSize:13,color:row.highlight?"#b45309":"#374151",fontWeight:row.highlight?800:600}}>{row.label}</span>
+                  <span style={{fontSize:13,color:adminMode&&row.highlight?"#b45309":"#374151",fontWeight:row.highlight?800:600}}>{row.label}</span>
                 </div>
                 <div style={{display:"flex",gap:16,alignItems:"center"}}>
                   <div style={{textAlign:"right"}}>
@@ -334,7 +334,7 @@ function App() {
   var s = useState, e = useEffect, r = useRef;
   var players_s      = s(loadPlayers);
   var players        = players_s[0], setPlayers = players_s[1];
-  var view_s         = s("setup");
+  var view_s         = s("players");
   var view           = view_s[0], setView = view_s[1];
   var profile_s      = s(null);
   var profileNum     = profile_s[0], setProfile = profile_s[1];
@@ -354,6 +354,18 @@ function App() {
   var histExp        = histExp_s[0], setHistExp = histExp_s[1];
   var mergeMode_s    = s(false);
   var mergeMode      = mergeMode_s[0], setMergeMode = mergeMode_s[1];
+  var histUnlocked_s = s(false);
+  var histUnlocked   = histUnlocked_s[0], setHistUnlocked = histUnlocked_s[1];
+  var pinInput_s     = s("");
+  var pinInput       = pinInput_s[0], setPinInput = pinInput_s[1];
+  var pinError_s     = s(false);
+  var pinError       = pinError_s[0], setPinError = pinError_s[1];
+  var adminMode_s    = s(false);
+  var adminMode      = adminMode_s[0], setAdminMode = adminMode_s[1];
+  var adminPin_s     = s("");
+  var adminPin       = adminPin_s[0], setAdminPin = adminPin_s[1];
+  var adminErr_s     = s(false);
+  var adminErr       = adminErr_s[0], setAdminErr = adminErr_s[1];
   var mergeSel_s     = s([]);
   var mergeSel       = mergeSel_s[0], setMergeSel = mergeSel_s[1];
   var mergeName_s    = s("");
@@ -573,6 +585,47 @@ function App() {
 
   function dismissResume(){
     clearActiveId(); setResumeId(null);
+  }
+
+  var ADMIN_PIN = "2020"; // Change this to your preferred PIN
+
+  function checkPin(){
+    if(pinInput===ADMIN_PIN){
+      setHistUnlocked(true);
+      setPinInput("");
+      setPinError(false);
+      showToast("History unlocked");
+    } else {
+      setPinError(true);
+      setPinInput("");
+      setTimeout(function(){ setPinError(false); }, 2000);
+    }
+  }
+
+  function checkAdminPin(){
+    if(adminPin==="2020"){
+      setAdminMode(true);
+      setAdminPin("");
+      setAdminErr(false);
+      setView("setup");
+    } else {
+      setAdminErr(true);
+      setAdminPin("");
+      setTimeout(function(){ setAdminErr(false); },2000);
+    }
+  }
+
+  function lockAdmin(){
+    setAdminMode(false);
+    setView("players");
+    setHistUnlocked(false);
+  }
+
+  function lockHistory(){
+    setHistUnlocked(false);
+    setMergeMode(false);
+    setMergeSel([]);
+    setPinInput("");
   }
 
   function toggleMergeSel(id){
@@ -807,21 +860,31 @@ function App() {
 
       {toast&&<div style={{position:"fixed",top:14,left:"50%",transform:"translateX(-50%)",background:C.sel,border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,color:C.selTx,zIndex:999,fontWeight:700,boxShadow:"0 4px 24px #0008",whiteSpace:"nowrap"}}>{toast}</div>}
 
-      <div style={{background:C.card,borderBottom:"2px solid #1e2235",padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{fontSize:17,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:C.headerTx}}>🥍 Lax Stats</div>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          {activeGame&&<div style={{textAlign:"right"}}>
-            <div style={{fontSize:12,color:C.headerTx,fontWeight:700}}>{activeGame.name}</div>
+      <div style={{background:"#1e3a8a",borderBottom:"2px solid #1a3070",padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:17,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#fff"}}>🥍 Lax Stats</div>
+          {!adminMode&&<div style={{fontSize:10,color:"#93c5fd",marginTop:2,letterSpacing:"0.06em"}}>Player Development — Knights</div>}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {adminMode&&activeGame&&<div style={{textAlign:"right"}}>
+            <div style={{fontSize:12,color:"#fff",fontWeight:700}}>{activeGame.name}</div>
             <button onClick={function(){try{navigator.clipboard.writeText(activeGame.id);}catch(e){}showToast("Copied: "+activeGame.id);}} style={{background:"#facc15",border:"2px solid #fbbf24",borderRadius:6,color:"#1e3a8a",fontFamily:M,fontSize:13,fontWeight:800,padding:"4px 12px",cursor:"pointer",marginTop:4,letterSpacing:"0.08em",boxShadow:"0 1px 4px #0003"}}>
               📋 ID: {activeGame.id}
             </button>
           </div>}
-          {view==="game"&&<div style={{width:8,height:8,borderRadius:"50%",background:live?C.liveG:C.red,boxShadow:live?"0 0 6px #16a34a66":"none"}}/>}
+          {adminMode&&view==="game"&&<div style={{width:8,height:8,borderRadius:"50%",background:live?C.liveG:C.red,boxShadow:live?"0 0 6px #16a34a66":"none"}}/>}
+          {adminMode
+            ?<button onClick={lockAdmin} style={{background:"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.3)",borderRadius:6,color:"#fff",fontFamily:M,fontSize:11,fontWeight:700,padding:"5px 12px",cursor:"pointer"}}>🔒 Lock</button>
+            :<button onClick={function(){setView("__adminlogin__");}} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.25)",borderRadius:6,color:"#bfdbfe",fontFamily:M,fontSize:11,fontWeight:600,padding:"5px 12px",cursor:"pointer"}}>Admin</button>
+          }
         </div>
       </div>
 
       <div style={{display:"flex",background:C.bg,padding:"10px 16px 0",borderBottom:"1px solid "+C.divider,gap:2}}>
-        {[["setup","Roster"],["game","Game"],["players","Players"],["history","History"],["guide","Guide"]].map(function(pair){
+        {(adminMode
+          ?[["setup","Roster"],["game","Game"],["players","Players"],["history","History"],["guide","Guide"]]
+          :[["players","Players"]]
+        ).map(function(pair){
           var tab=pair[0],label=pair[1];
           var act=view===tab, dis=tab==="game"&&!activeGame;
           return (
@@ -835,7 +898,32 @@ function App() {
 
       <div style={{padding:18}}>
 
-        {view==="setup"&&(
+        {view==="__adminlogin__"&&(
+          <div style={{maxWidth:300,margin:"60px auto",textAlign:"center"}}>
+            <div style={{fontSize:32,marginBottom:12}}>🔐</div>
+            <div style={{fontSize:16,fontWeight:700,color:"#111827",marginBottom:6}}>Admin Access</div>
+            <div style={{fontSize:13,color:"#6b7280",marginBottom:20}}>Enter PIN to access game entry, history and settings</div>
+            <input
+              type="password"
+              placeholder="Enter PIN"
+              value={adminPin}
+              onChange={function(ev){setAdminPin(ev.target.value);}}
+              onKeyDown={function(ev){if(ev.key==="Enter")checkAdminPin();}}
+              style={{background:adminErr?"#fef2f2":"#fff",border:"2px solid "+(adminErr?"#dc2626":"#d1d5db"),borderRadius:8,color:"#111827",fontFamily:M,fontSize:20,padding:"12px 16px",outline:"none",width:"100%",textAlign:"center",boxSizing:"border-box",marginBottom:10,letterSpacing:"0.3em"}}
+            />
+            {adminErr&&<div style={{fontSize:13,color:"#dc2626",marginBottom:10,fontWeight:600}}>Incorrect PIN</div>}
+            <button onClick={checkAdminPin}
+              style={{background:"#1e3a8a",border:"none",borderRadius:8,color:"#fff",fontFamily:M,fontSize:15,fontWeight:700,padding:"12px",cursor:"pointer",width:"100%",textTransform:"uppercase"}}>
+              Unlock
+            </button>
+            <button onClick={function(){setView("players");setAdminPin("");}}
+              style={{background:"transparent",border:"none",color:"#6b7280",fontFamily:M,fontSize:13,padding:"12px",cursor:"pointer",marginTop:4}}>
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {view==="setup"&&adminMode&&(
           <div>
             {resumeId&&!activeGame&&(
               <div style={{background:"#eff6ff",border:"2px solid #1e3a8a",borderRadius:12,padding:16,marginBottom:16}}>
@@ -900,7 +988,7 @@ function App() {
           </div>
         )}
 
-        {view==="game"&&activeGame&&(
+        {view==="game"&&activeGame&&adminMode&&(
           <div>
             {/* Step-by-step hint bar — always visible at top */}
             <div style={{background:"#1e3a8a",borderRadius:10,padding:"10px 14px",marginBottom:12}}>
@@ -1114,11 +1202,11 @@ function App() {
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <span style={{fontSize:15,fontWeight:700,color:"#111827"}}>#{n}</span>
-                      <span style={{fontSize:20,fontWeight:800,color:"#b45309"}}>{sp} <span style={{fontSize:11,color:"#6b7280",fontWeight:400}}>pts</span></span>
+                      {adminMode&&<span style={{fontSize:20,fontWeight:800,color:"#b45309"}}>{sp} <span style={{fontSize:11,color:"#6b7280",fontWeight:400}}>pts</span></span>}
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
-                      <span style={{fontSize:12,color:"#374151",fontWeight:500}}>{gp} game{gp!==1?"s":""} · avg {gp?(sp/gp).toFixed(1):"—"}/game</span>
-                      {cp!==null&&<span style={{fontSize:11,color:"#1e3a8a",fontWeight:700}}>Now: {cp}pts</span>}
+                      <span style={{fontSize:12,color:"#374151",fontWeight:500}}>{gp} game{gp!==1?"s":""}{adminMode?" · avg "+(gp?(sp/gp).toFixed(1):"—")+"/game":""}</span>
+                      {cp!==null&&adminMode&&<span style={{fontSize:11,color:"#1e3a8a",fontWeight:700}}>Now: {cp}pts</span>}
                     </div>
                     {series.length>=2&&<div style={{marginTop:6}}><Spark vals={series} w={160} h={22}/></div>}
                     {(function(){
@@ -1178,7 +1266,7 @@ function App() {
           </div>
         )}
 
-        {view==="guide"&&(
+        {view==="guide"&&adminMode&&(
           <div>
             <div style={{fontSize:13,color:"#374151",marginBottom:16,lineHeight:1.6}}>
               All stats tracked per player per game. Points contribute to the player leaderboard.
@@ -1279,12 +1367,36 @@ function App() {
           </div>
         )}
 
-        {view==="history"&&(
+        {view==="history"&&adminMode&&(
           <div>
             {!allGames.length&&<div style={{color:"#111827",fontSize:14,fontWeight:500}}>No games saved yet.</div>}
 
-            {/* Merge toolbar */}
-            {allGames.length>1&&(
+            {/* Admin unlock bar */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              {histUnlocked?(
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{fontSize:12,color:"#15803d",fontWeight:700}}>🔓 Admin unlocked</div>
+                  <button onClick={lockHistory} style={{background:"transparent",border:"1px solid #9ca3af",borderRadius:6,color:"#374151",fontFamily:M,fontSize:11,fontWeight:700,padding:"4px 10px",cursor:"pointer"}}>Lock</button>
+                </div>
+              ):(
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <input
+                    type="password"
+                    placeholder="Admin PIN"
+                    value={pinInput}
+                    onChange={function(ev){setPinInput(ev.target.value);}}
+                    onKeyDown={function(ev){if(ev.key==="Enter")checkPin();}}
+                    style={{background:pinError?"#fef2f2":"#fff",border:"1px solid "+(pinError?"#dc2626":"#d1d5db"),borderRadius:6,color:"#111827",fontFamily:M,fontSize:14,padding:"7px 10px",outline:"none",width:110}}
+                  />
+                  <button onClick={checkPin} style={{background:"#1e3a8a",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:12,fontWeight:700,padding:"7px 14px",cursor:"pointer"}}>
+                    {pinError?"Wrong PIN":"Unlock"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Merge toolbar — admin only */}
+            {histUnlocked&&allGames.length>1&&(
               <div style={{marginBottom:14}}>
                 {!mergeMode?(
                   <button onClick={function(){setMergeMode(true);setMergeSel([]);}}
@@ -1423,11 +1535,11 @@ function App() {
                     <div style={{display:"flex",gap:8}}>
                       <button style={{background:"transparent",border:"1px solid #4b5563",borderRadius:6,color:"#374151",fontFamily:M,fontSize:12,fontWeight:700,padding:"5px 10px",cursor:"pointer",textTransform:"uppercase"}}
                         onClick={function(){setHistExp(function(h){var u=Object.assign({},h);u[game.id]=!exp;return u;});}}>{exp?"Hide":"Stats"}</button>
-                      {confDel===game.id
+                      {histUnlocked&&(confDel===game.id
                         ?<span><button style={{background:"#ef4444",border:"none",borderRadius:6,color:"#fff",fontFamily:M,fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer",marginRight:6}} onClick={function(){delGame(game.id);}}>Sure?</button>
                            <button style={{background:"transparent",border:"1px solid #4b5563",borderRadius:6,color:"#374151",fontFamily:M,fontSize:12,fontWeight:700,padding:"5px 10px",cursor:"pointer"}} onClick={function(){setConfDel(null);}}>No</button></span>
                         :<button style={{background:"transparent",border:"1px solid #dc2626",borderRadius:6,color:"#dc2626",fontFamily:M,fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer",textTransform:"uppercase"}} onClick={function(){setConfDel(game.id);}}>Del</button>
-                      }
+                      )}
                     </div>
                   </div>
                   {exp&&game.stats&&(
